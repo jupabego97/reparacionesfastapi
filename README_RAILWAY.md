@@ -29,7 +29,7 @@ Este proyecto está preparado para desplegarse en Railway con **3 servicios sepa
 3. **Variables** (o **Variables** en el dashboard):
    - `DATABASE_URL` → Referencia al servicio PostgreSQL (clic en el add-on y **Connect** → copia la variable)
    - `ENVIRONMENT` = `production`
-   - `ALLOWED_ORIGINS` = URL del frontend (ej: `https://reparacionesfastapi-frontend.up.railway.app`)
+   - `ALLOWED_ORIGINS` = **URL exacta del frontend** (ej: `https://just-wisdom-production-d465.up.railway.app`). Sin esta variable, CORS bloqueará Socket.IO y la API desde otro dominio.
    - `GEMINI_API_KEY` = *(opcional)*
    - `SOCKETIO_SAFE_MODE` = `1`
 4. **Settings** → **Networking** → **Generate Domain** para obtener la URL pública del backend (ej: `https://reparacionesfastapi-backend.up.railway.app`)
@@ -73,7 +73,7 @@ cd backend && python -m alembic upgrade head
 |------------|------------------|------------------------------------------------------------|
 | Backend    | DATABASE_URL     | `postgresql://...` (de add-on PostgreSQL)                  |
 | Backend    | ENVIRONMENT      | `production`                                               |
-| Backend    | ALLOWED_ORIGINS  | `https://reparacionesfastapi-frontend.up.railway.app`      |
+| Backend    | ALLOWED_ORIGINS  | URL exacta del frontend (ej: `https://just-wisdom-production-d465.up.railway.app`). **Obligatorio** para CORS cross-origin |
 | Backend    | GEMINI_API_KEY   | *(opcional)*                                               |
 | Backend    | SOCKETIO_SAFE_MODE | `1`                                                      |
 | Frontend   | VITE_API_URL     | `https://reparacionesfastapi-backend.up.railway.app`      |

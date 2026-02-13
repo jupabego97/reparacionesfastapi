@@ -6,9 +6,11 @@ from app.core.config import get_settings
 settings = get_settings()
 transports = ["polling"] if settings.socketio_safe_mode else ["websocket", "polling"]
 cors = settings.get_cors_origins()
-if isinstance(cors, str):
-    cors = "*"
-
+if isinstance(cors, str) and settings.is_production:
+    logger.warning(
+        "ALLOWED_ORIGINS vacío en producción: CORS '*' no funciona con credenciales (Socket.IO). "
+        "Define ALLOWED_ORIGINS con la URL del frontend, ej: https://just-wisdom-production-d465.up.railway.app"
+    )
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins=cors,
