@@ -78,13 +78,13 @@ def _auto_migrate_columns():
 
         existing = {c["name"] for c in inspector.get_columns("repair_cards")}
         migrations = [
-            ("prioridad", "VARCHAR(20) DEFAULT 'media'"),
+            ("priority", "VARCHAR(20) DEFAULT 'media'"),
             ("position", "INTEGER DEFAULT 0"),
             ("assigned_to", "INTEGER"),
-            ("asignado_nombre", "VARCHAR(200)"),
-            ("costo_estimado", "FLOAT"),
-            ("costo_final", "FLOAT"),
-            ("notas_costo", "TEXT"),
+            ("assigned_name", "VARCHAR(200)"),
+            ("estimated_cost", "FLOAT"),
+            ("final_cost", "FLOAT"),
+            ("cost_notes", "TEXT"),
             ("deleted_at", "TIMESTAMP"),
         ]
 
