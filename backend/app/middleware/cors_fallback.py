@@ -28,7 +28,7 @@ def wrap_with_cors_fallback(app, origin_regex: str | None):
                 (b"access-control-allow-origin", origin.encode()),
                 (b"access-control-allow-credentials", b"true"),
                 (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, PATCH, OPTIONS"),
-                (b"access-control-allow-headers", b"Content-Type, Authorization, X-Requested-With"),
+                (b"access-control-allow-headers", b"*"),
                 (b"access-control-max-age", b"86400"),
             ]})
             await send({"type": "http.response.body", "body": b""})
