@@ -31,17 +31,13 @@ npm run dev
 
 Frontend en http://localhost:5173 (proxy a API en 8000)
 
-## Despliegue en Railway
+## Despliegue en Railway (3 servicios)
 
-1. Conecta este repo a Railway: [railway.app](https://railway.app) → New Project → Deploy from GitHub → selecciona `reparacionesfastapi`
-2. **Root directory**: deja vacío o usa `.` (Railway ejecutará el Procfile en la raíz)
-3. **Variables de entorno** (Railway → Variables):
-   - `DATABASE_URL` - PostgreSQL (Railway ofrece add-on gratuito)
-   - `GEMINI_API_KEY` - opcional, para IA
-   - `ENVIRONMENT=production`
-   - `ALLOWED_ORIGINS` - URL del frontend (ej: `https://tu-app.up.railway.app`)
-   - `SOCKETIO_SAFE_MODE=1` - recomendado para Socket.IO detrás de proxy
-4. El Procfile ejecuta el backend. Para frontend: build local (`npm run build` en `frontend/`) y servir `dist/` desde el backend, o desplegar frontend aparte (Vercel/Netlify) apuntando a la API.
+Backend, frontend y base de datos como servicios separados. Ver **[README_RAILWAY.md](README_RAILWAY.md)** para instrucciones detalladas.
+
+- **Backend**: Root = `.` (usa Procfile raíz)
+- **Frontend**: Root = `frontend` (usa frontend/Procfile)
+- **Database**: Add PostgreSQL desde Railway
 
 ## Rollback
 

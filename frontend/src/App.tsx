@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { io } from 'socket.io-client'
-import { api, type Tarjeta } from './api/client'
+import { api, API_BASE, type Tarjeta } from './api/client'
 import { useDebounce } from './hooks/useDebounce'
 import { filtrarTarjetas, type Filtros } from './utils/filtrarTarjetas'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -57,7 +57,7 @@ function App() {
 
   useEffect(() => {
     const transports = localStorage.getItem('socketio_safe_mode') !== '0' ? ['polling'] : ['websocket', 'polling']
-    const socket = io({
+    const socket = io(API_BASE || undefined, {
       path: '/socket.io',
       transports: transports as ('polling' | 'websocket')[],
       upgrade: transports.length > 1,
