@@ -37,12 +37,12 @@ function App() {
   const filtrosCompletos = useMemo(() => ({ ...filtros, busqueda: debouncedBusqueda }), [filtros, debouncedBusqueda])
   const tarjetasFiltradas = useMemo(() => filtrarTarjetas(tarjetas, filtrosCompletos), [tarjetas, filtrosCompletos])
 
-  const { data, refetch, isLoading } = useQuery({
+  const { data, refetch, isLoading, isError, error } = useQuery({
     queryKey: ['tarjetas'],
     queryFn: async () => {
       const res = await api.getTarjetas()
       const list = Array.isArray(res) ? res : (res as { tarjetas: Tarjeta[] }).tarjetas
-      return list
+      return list ?? []
     },
   })
 
@@ -143,7 +143,18 @@ function App() {
         />
 
         <main className="pb-4">
-          {isLoading ? (
+          {isError ? (
+            <div className="alert alert-danger mx-3">
+              <strong>Error al cargar tarjetas:</strong> {(error as Error)?.message}
+              {!API_BASE && (
+                <div className="mt-2 small">
+                  <strong>Sugerencia:</strong> En producción, asegúrate de que el frontend tenga configurada la variable{' '}
+                  <code>VITE_API_URL</code> con la URL del backend (ej: https://reparacionesfastapi-production.up.railway.app)
+                </div>
+              )}
+              <button className="btn btn-sm btn-outline-danger mt-2" onClick={() => refetch()}>Reintentar</button>
+            </div>
+          ) : isLoading ? (
             <div className="text-center py-5">Cargando tarjetas...</div>
           ) : (
             <KanbanBoard

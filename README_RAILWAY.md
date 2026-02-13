@@ -41,9 +41,9 @@ Este proyecto está preparado para desplegarse en Railway con **3 servicios sepa
    - **Root Directory**: `frontend`
    - **Build Command**: *(dejar vacío o* `npm run build`*)*
    - **Start Command**: *(dejar vacío – usa Procfile)*
-3. **Variables**:
-   - `VITE_API_URL` = URL del backend (ej: `https://reparacionesfastapi-backend.up.railway.app`)
-   - Importante: sin barra final (`/`)
+3. **Variables** (obligatorias para que carguen las tarjetas):
+   - `VITE_API_URL` = URL del backend (ej: `https://reparacionesfastapi-production.up.railway.app`)
+   - Sin barra final (`/`). Se usa en build: si no está, las tarjetas no cargan (fetch va al mismo dominio y falla).
 4. **Settings** → **Networking** → **Generate Domain**
 
 ### 5. Migraciones de BD
