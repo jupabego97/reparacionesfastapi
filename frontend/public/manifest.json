@@ -1,0 +1,14 @@
+{
+  "name": "Sistema de Reparaciones - Nanotronics",
+  "short_name": "Nanotronics",
+  "description": "Gestión de reparaciones de dispositivos electrónicos con IA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#00ACC1",
+  "scope": "/",
+  "lang": "es-ES",
+  "icons": [
+    { "src": "/vite.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

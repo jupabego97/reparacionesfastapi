@@ -1,0 +1,106 @@
+{
+  "version": "1.0",
+  "referencia": "flask copy",
+  "actualizado": "2025-02-12",
+  "estados_validos": ["ingresado", "diagnosticada", "para_entregar", "listos"],
+  "endpoints": {
+    "GET /health": {
+      "response_200": {
+        "status": "healthy|degraded",
+        "timestamp": "ISO8601",
+        "services": { "database": "healthy|unhealthy", "gemini_ai": "healthy|unavailable" }
+      }
+    },
+    "GET /api/tarjetas": {
+      "query": { "page": "int?", "per_page": "int?", "light": "1|undefined" },
+      "response_legacy": "Tarjeta[]",
+      "response_paginado": { "tarjetas": "Tarjeta[]", "pagination": { "page": 1, "per_page": 50, "total": 0, "pages": 0, "has_next": false, "has_prev": false } }
+    },
+    "POST /api/tarjetas": {
+      "body": "TarjetaCreate",
+      "response_201": "Tarjeta"
+    },
+    "PUT /api/tarjetas/{id}": {
+      "body": "TarjetaUpdate",
+      "response_200": "Tarjeta"
+    },
+    "DELETE /api/tarjetas/{id}": {
+      "response_204": null
+    },
+    "GET /api/tarjetas/{id}/historial": {
+      "response_200": "HistorialEntry[]"
+    },
+    "GET /api/estadisticas": {
+      "response_200": "Estadisticas"
+    },
+    "GET /api/exportar": {
+      "query": { "formato": "csv|excel", "estado": "string?", "fecha_desde": "YYYY-MM-DD?", "fecha_hasta": "YYYY-MM-DD?" }
+    },
+    "POST /api/procesar-imagen": {
+      "body": { "image": "base64 string" },
+      "response_200": { "nombre": "string", "telefono": "string", "tiene_cargador": "boolean" }
+    },
+    "POST /api/transcribir-audio": {
+      "body": "multipart/form-data { audio: File }",
+      "response_200": { "transcripcion": "string" }
+    },
+    "POST /api/procesar-multimedia": {
+      "body": { "image": "base64", "audio": "base64|optional" },
+      "response_200": { "imagen": "ProcesarImagenResult", "audio": "string|{error}" }
+    }
+  },
+  "schemas": {
+    "Tarjeta": {
+      "id": "int",
+      "nombre_propietario": "string",
+      "problema": "string",
+      "whatsapp": "string",
+      "fecha_inicio": "YYYY-MM-DD HH:MM:SS|null",
+      "fecha_limite": "YYYY-MM-DD|null",
+      "columna": "estado_valido",
+      "tiene_cargador": "si|no",
+      "fecha_diagnosticada": "string|null",
+      "fecha_para_entregar": "string|null",
+      "fecha_entregada": "string|null",
+      "notas_tecnicas": "string|null",
+      "imagen_url": "string|null"
+    },
+    "TarjetaCreate": {
+      "nombre_propietario": "string? default Cliente",
+      "problema": "string? default Sin descripción",
+      "whatsapp": "string? default ''",
+      "fecha_limite": "YYYY-MM-DD? default tomorrow",
+      "imagen_url": "string?",
+      "tiene_cargador": "si|no? default si",
+      "notas_tecnicas": "string?"
+    },
+    "TarjetaUpdate": {
+      "nombre_propietario": "string?",
+      "problema": "string?",
+      "whatsapp": "string?",
+      "fecha_limite": "YYYY-MM-DD?",
+      "imagen_url": "string?",
+      "tiene_cargador": "si|no?",
+      "notas_tecnicas": "string?",
+      "columna": "estado_valido?"
+    },
+    "HistorialEntry": { "id": "int", "tarjeta_id": "int", "old_status": "string|null", "new_status": "string", "changed_at": "string" },
+    "Estadisticas": {
+      "totales_por_estado": { "ingresado": 0, "diagnosticada": 0, "para_entregar": 0, "listos": 0 },
+      "tiempos_promedio_dias": { "ingresado_a_diagnosticada": 0, "diagnosticada_a_para_entregar": 0, "para_entregar_a_entregados": 0 },
+      "completadas_ultimo_mes": 0,
+      "pendientes": 0,
+      "top_problemas": [{ "problema": "string", "cantidad": 0 }],
+      "tasa_cargador": { "con_cargador": 0, "sin_cargador": 0, "porcentaje_con_cargador": 0 },
+      "tendencia_6_meses": [{ "mes": "YYYY-MM", "total": 0 }],
+      "total_reparaciones": 0,
+      "con_notas_tecnicas": 0,
+      "generado_at": "string"
+    }
+  },
+  "socketio_events": {
+    "server_emits": ["tarjeta_creada", "tarjeta_actualizada", "tarjeta_eliminada", "status"],
+    "client_emits": ["join"],
+    "tarjeta_eliminada_payload": { "id": "int" }
+  }
+}
