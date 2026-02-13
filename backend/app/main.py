@@ -14,7 +14,10 @@ from app.core.limiter import limiter
 from app.core.logging_config import setup_logging
 from app.core.database import engine
 from app.models.repair_card import Base
+# Importar TODOS los modelos para que se registren con Base.metadata
+from app.models import User, KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags
 from app.api.routes import health, tarjetas, estadisticas, exportar, multimedia
+from app.api.routes import auth, kanban as kanban_routes
 from app.api.routes.multimedia import executor
 
 @asynccontextmanager
@@ -23,11 +26,19 @@ async def lifespan(app: FastAPI):
     setup_logging(settings.environment)
     # Crear tablas si no existen
     Base.metadata.create_all(bind=engine)
+    # Crear admin por defecto
+    from app.core.database import SessionLocal
+    from app.services.auth_service import create_default_admin
+    db = SessionLocal()
+    try:
+        create_default_admin(db)
+    finally:
+        db.close()
+
     # Corregir secuencia PostgreSQL en producción
     if settings.is_production:
         try:
             from sqlalchemy import text
-            from app.core.database import SessionLocal
             db = SessionLocal()
             try:
                 dialect = db.get_bind().dialect.name
@@ -52,8 +63,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="Sistema de Reparaciones - API",
-        description="API para gestión de reparaciones de dispositivos electrónicos",
-        version="1.0.0",
+        description="API para gestión de reparaciones de dispositivos electrónicos con tablero Kanban profesional",
+        version="2.0.0",
         lifespan=lifespan,
     )
     app.state.limiter = limiter
@@ -78,7 +89,7 @@ def create_app() -> FastAPI:
         elapsed = time.time() - request.state.start_time
         if elapsed > 0.5 and hasattr(request, "url"):
             path = request.url.path
-            if path in ("/api/tarjetas", "/api/estadisticas", "/api/procesar-imagen"):
+            if "/api/" in path:
                 import loguru
                 loguru.logger.info(f"[{request_id}] {request.method} {path} {elapsed:.2f}s")
         return response
@@ -98,11 +109,14 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, **cors_kw)
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
+    # Registrar todas las rutas
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(tarjetas.router)
     app.include_router(estadisticas.router)
     app.include_router(exportar.router)
     app.include_router(multimedia.router)
+    app.include_router(kanban_routes.router)
 
     return app
 

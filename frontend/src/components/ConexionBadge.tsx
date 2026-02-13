@@ -1,15 +1,18 @@
 interface Props {
-  conectado: boolean | null
+  status: 'connecting' | 'connected' | 'disconnected';
 }
 
-export function ConexionBadge({ conectado }: Props) {
-  if (conectado === null) return <span className="badge bg-secondary">Conectando...</span>
+const statusConfig = {
+  connecting: { label: 'Conectando', icon: 'fas fa-circle-notch fa-spin' },
+  connected: { label: 'Conectado', icon: 'fas fa-check-circle' },
+  disconnected: { label: 'Desconectado', icon: 'fas fa-times-circle' },
+};
+
+export default function ConexionBadge({ status }: Props) {
+  const cfg = statusConfig[status];
   return (
-    <span
-      className={`badge ${conectado ? 'bg-success' : 'bg-secondary'}`}
-      title={conectado ? 'Sincronización activa' : 'Sin conexión'}
-    >
-      ● {conectado ? 'Conectado' : 'Sin conexión'}
+    <span className={`connection-badge ${status}`}>
+      <i className={cfg.icon}></i> {cfg.label}
     </span>
-  )
+  );
 }

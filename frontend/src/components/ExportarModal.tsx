@@ -1,101 +1,77 @@
-import { useState } from 'react'
-import { api } from '../api/client'
+import { useState } from 'react';
+import { api } from '../api/client';
+import type { KanbanColumn } from '../api/client';
+import { useQuery } from '@tanstack/react-query';
 
-interface Props {
-  show: boolean
-  onClose: () => void
-}
+interface Props { onClose: () => void; }
 
-export function ExportarModal({ show, onClose }: Props) {
-  const [formato, setFormato] = useState<'csv' | 'excel'>('csv')
-  const [estado, setEstado] = useState('todos')
-  const [fechaDesde, setFechaDesde] = useState('')
-  const [fechaHasta, setFechaHasta] = useState('')
-  const [descargando, setDescargando] = useState(false)
-  const [error, setError] = useState('')
+export default function ExportarModal({ onClose }: Props) {
+  const [formato, setFormato] = useState('csv');
+  const [estado, setEstado] = useState('todos');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  if (!show) return null
+  const { data: columnas = [] } = useQuery<KanbanColumn[]>({ queryKey: ['columnas'], queryFn: api.getColumnas });
 
-  const descargar = async () => {
-    setError('')
-    setDescargando(true)
+  const handleExport = async () => {
+    setLoading(true);
     try {
-      const blob = await api.exportar({
-        formato,
-        estado: estado !== 'todos' ? estado : undefined,
-        fecha_desde: fechaDesde || undefined,
-        fecha_hasta: fechaHasta || undefined,
-      })
-      const ext = formato === 'excel' ? 'xlsx' : 'csv'
-      const filename = `reparaciones_nanotronics_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}.${ext}`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(url)
-      onClose()
+      const blob = await api.exportar({ formato, estado: estado !== 'todos' ? estado : undefined, fecha_desde: fechaDesde || undefined, fecha_hasta: fechaHasta || undefined });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reparaciones.${formato === 'csv' ? 'csv' : 'xlsx'}`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (e) {
-      setError(String(e))
-    } finally {
-      setDescargando(false)
+      console.error('Error al exportar:', e);
     }
-  }
+    setLoading(false);
+  };
 
   return (
-    <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog">
-        <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title"><i className="fas fa-download me-2" /> Exportar Datos</h5>
-            <button type="button" className="btn-close" onClick={onClose} aria-label="Cerrar" />
-          </div>
-          <div className="modal-body">
-            <div className="mb-3">
-              <label className="form-label"><strong>Formato</strong></label>
-              <div className="form-check">
-                <input type="radio" className="form-check-input" id="fmtCSV" checked={formato === 'csv'} onChange={() => setFormato('csv')} />
-                <label className="form-check-label" htmlFor="fmtCSV"><i className="fas fa-file-csv text-success" /> CSV</label>
-              </div>
-              <div className="form-check">
-                <input type="radio" className="form-check-input" id="fmtExcel" checked={formato === 'excel'} onChange={() => setFormato('excel')} />
-                <label className="form-check-label" htmlFor="fmtExcel"><i className="fas fa-file-excel text-success" /> Excel (.xlsx)</label>
-              </div>
-            </div>
-            <div className="mb-3">
-              <label className="form-label"><strong>Filtrar por Estado</strong></label>
-              <select className="form-select" value={estado} onChange={(e) => setEstado(e.target.value)}>
-                <option value="todos">Todos</option>
-                <option value="ingresado">Ingresado</option>
-                <option value="diagnosticada">En Diagnóstico</option>
-                <option value="para_entregar">Para Entregar</option>
-                <option value="listos">Completados</option>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-pro" onClick={e => e.stopPropagation()}>
+        <div className="modal-pro-header">
+          <h3><i className="fas fa-file-export"></i> Exportar Datos</h3>
+          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+        </div>
+        <div className="modal-pro-body">
+          <div className="edit-form">
+            <div className="form-group">
+              <label><i className="fas fa-file-alt"></i> Formato</label>
+              <select value={formato} onChange={e => setFormato(e.target.value)}>
+                <option value="csv">CSV</option>
+                <option value="excel">Excel (XLSX)</option>
               </select>
             </div>
-            <div className="mb-3">
-              <label className="form-label"><strong>Rango de Fechas</strong></label>
-              <div className="row">
-                <div className="col-6">
-                  <input type="date" className="form-control" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} placeholder="Desde" />
-                </div>
-                <div className="col-6">
-                  <input type="date" className="form-control" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} placeholder="Hasta" />
-                </div>
+            <div className="form-group">
+              <label><i className="fas fa-filter"></i> Estado</label>
+              <select value={estado} onChange={e => setEstado(e.target.value)}>
+                <option value="todos">Todos</option>
+                {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label><i className="fas fa-calendar"></i> Desde</label>
+                <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label><i className="fas fa-calendar"></i> Hasta</label>
+                <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} />
               </div>
             </div>
-            {error && <div className="alert alert-danger">{error}</div>}
-            <div className="alert alert-info">
-              <i className="fas fa-info-circle" /> <small>Se exportarán los datos según los filtros seleccionados.</small>
-            </div>
           </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={descargando}>Cancelar</button>
-            <button type="button" className="btn btn-success" onClick={descargar} disabled={descargando}>
-              <i className="fas fa-download me-1" /> {descargando ? 'Descargando...' : 'Descargar'}
-            </button>
-          </div>
+        </div>
+        <div className="modal-pro-footer">
+          <button className="btn-cancel" onClick={onClose}>Cancelar</button>
+          <button className="btn-save" onClick={handleExport} disabled={loading}>
+            {loading ? <><i className="fas fa-spinner fa-spin"></i> Exportando...</> : <><i className="fas fa-download"></i> Exportar</>}
+          </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

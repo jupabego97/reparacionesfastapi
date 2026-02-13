@@ -1,266 +1,276 @@
-import { useState, useRef, useEffect } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { useState, useRef, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
+import type { Tag, UserInfo } from '../api/client';
 
 interface Props {
-  show: boolean
-  onClose: () => void
-  onCreada: () => void
+  onClose: () => void;
 }
 
-export function NuevaTarjetaModal({ show, onClose, onCreada }: Props) {
-  const [paso, setPaso] = useState(1)
-  const [nombre, setNombre] = useState('Cliente')
-  const [problema, setProblema] = useState('Sin descripción')
-  const [whatsapp, setWhatsapp] = useState('')
-  const [fechaLimite, setFechaLimite] = useState('')
-  const [imagenUrl, setImagenUrl] = useState('')
-  const [tieneCargador, setTieneCargador] = useState('si')
-  const [analizando, setAnalizando] = useState(false)
-  const [capturaLista, setCapturaLista] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+export default function NuevaTarjetaModal({ onClose }: Props) {
+  const qc = useQueryClient();
+  const [step, setStep] = useState<'capture' | 'form'>('capture');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [cameraActive, setCameraActive] = useState(false);
 
-  const queryClient = useQueryClient()
+  const [form, setForm] = useState({
+    nombre_propietario: '',
+    problema: '',
+    whatsapp: '',
+    fecha_limite: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+    tiene_cargador: 'si',
+    imagen_url: '',
+    prioridad: 'media',
+    asignado_a: '' as string | number,
+    costo_estimado: '' as string | number,
+    notas_tecnicas: '',
+  });
+  const [selectedTags, setSelectedTags] = useState<number[]>([]);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
-  const analizarMut = useMutation({
-    mutationFn: (imageData: string) => api.procesarImagen(imageData),
-    onSuccess: (res: { nombre: string; telefono: string; tiene_cargador: boolean }) => {
-      setNombre(res.nombre || 'Cliente')
-      setWhatsapp(res.telefono || '')
-      setTieneCargador(res.tiene_cargador ? 'si' : 'no')
-      setAnalizando(false)
-      setPaso(2)
-    },
-    onError: () => setAnalizando(false),
-  })
-
-  const procesarImagen = (base64: string) => {
-    setAnalizando(true)
-    setImagenUrl(base64)
-    analizarMut.mutate(base64)
-  }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !file.type.startsWith('image/')) return
-    const r = new FileReader()
-    r.onload = () => procesarImagen(r.result as string)
-    r.readAsDataURL(file)
-    e.target.value = ''
-  }
-
-  const [camaraError, setCamaraError] = useState<string | null>(null)
-
-  const iniciarCamara = async () => {
-    setCamaraError(null)
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      streamRef.current = s
-      if (videoRef.current) {
-        videoRef.current.srcObject = s
-        videoRef.current.style.display = 'block'
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'No se pudo acceder a la cámara'
-      setCamaraError(msg)
-      console.error('Error cámara:', err)
-    }
-  }
-
-  const tomarFoto = () => {
-    if (!videoRef.current || !canvasRef.current) return
-    const ctx = canvasRef.current.getContext('2d')
-    if (!ctx) return
-    canvasRef.current.width = videoRef.current.videoWidth
-    canvasRef.current.height = videoRef.current.videoHeight
-    ctx.drawImage(videoRef.current, 0, 0)
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg')
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
-    videoRef.current.style.display = 'none'
-    setCapturaLista(true)
-    procesarImagen(dataUrl)
-  }
-
-  const reintentar = () => {
-    setCapturaLista(false)
-    setAnalizando(false)
-    iniciarCamara()
-  }
-
-  const resetear = () => {
-    setPaso(1)
-    setCapturaLista(false)
-    setAnalizando(false)
-    setNombre('Cliente')
-    setProblema('Sin descripción')
-    setWhatsapp('')
-    setImagenUrl('')
-    setTieneCargador('si')
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
-  }
-
-  useEffect(() => {
-    if (!show) return
-    resetear()
-    iniciarCamara()
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop())
-        streamRef.current = null
-      }
-    }
-  }, [show])
+  const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags });
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers });
 
   const createMut = useMutation({
-    mutationFn: (data: object) => api.createTarjeta(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tarjetas'] })
-      onCreada()
-    },
-  })
+    mutationFn: (data: any) => api.createTarjeta(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
+    onError: (e: any) => setError(e.message || 'Error al crear'),
+  });
 
-  if (!show) return null
+  useEffect(() => {
+    return () => {
+      if (videoRef.current?.srcObject) {
+        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      }
+    };
+  }, []);
 
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const defaultFecha = tomorrow.toISOString().slice(0, 10)
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) { videoRef.current.srcObject = stream; setCameraActive(true); }
+    } catch { setError('No se pudo acceder a la cámara'); }
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+    c.getContext('2d')?.drawImage(v, 0, 0);
+    const dataUrl = c.toDataURL('image/jpeg', 0.7);
+    processImage(dataUrl);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { if (ev.target?.result) processImage(ev.target.result as string); };
+    reader.readAsDataURL(file);
+  };
+
+  const processImage = async (imageData: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await api.procesarImagen(imageData);
+      setForm(prev => ({
+        ...prev,
+        nombre_propietario: result.nombre || prev.nombre_propietario,
+        whatsapp: result.telefono || prev.whatsapp,
+        tiene_cargador: result.tiene_cargador ? 'si' : 'no',
+        imagen_url: imageData,
+      }));
+      setStep('form');
+    } catch {
+      setForm(prev => ({ ...prev, imagen_url: imageData }));
+      setStep('form');
+    }
+    setLoading(false);
+    if (videoRef.current?.srcObject) {
+      (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      setCameraActive(false);
+    }
+  };
+
+  // Mejora #27: Validación con mensajes claros
+  const validate = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!form.nombre_propietario.trim()) errs.nombre = 'El nombre es requerido';
+    if (form.whatsapp && !/^\+?\d{7,15}$/.test(form.whatsapp.replace(/[\s-]/g, ''))) {
+      errs.whatsapp = 'Formato: +57 300 123 4567';
+    }
+    if (!form.fecha_limite) errs.fecha = 'La fecha límite es requerida';
+    setValidationErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
 
   const handleSubmit = () => {
+    if (!validate()) return;
     createMut.mutate({
-      nombre_propietario: nombre || 'Cliente',
-      problema: problema || 'Sin descripción',
-      whatsapp: whatsapp,
-      fecha_limite: fechaLimite || defaultFecha,
-      imagen_url: imagenUrl || undefined,
-      tiene_cargador: tieneCargador,
-    })
-  }
+      nombre_propietario: form.nombre_propietario.trim(),
+      problema: form.problema.trim() || 'Sin descripción',
+      whatsapp: form.whatsapp.trim(),
+      fecha_limite: form.fecha_limite,
+      tiene_cargador: form.tiene_cargador,
+      imagen_url: form.imagen_url || undefined,
+      prioridad: form.prioridad,
+      asignado_a: form.asignado_a ? Number(form.asignado_a) : undefined,
+      costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : undefined,
+      notas_tecnicas: form.notas_tecnicas || undefined,
+      tags: selectedTags.length ? selectedTags : undefined,
+    });
+  };
 
   return (
-    <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog modal-lg">
-        <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title">Nueva Reparación con IA</h5>
-            <button type="button" className="btn-close" onClick={onClose} />
-          </div>
-          <div className="modal-body">
-            <div className="mb-3">
-              <div className="progress mb-2">
-                <div className="progress-bar" style={{ width: paso === 1 ? '50%' : '100%' }} />
-              </div>
-              <div className="d-flex justify-content-between small text-muted">
-                <span>📷 Foto</span>
-                <span>🤖 Procesar & Crear</span>
-              </div>
-            </div>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-pro" onClick={e => e.stopPropagation()}>
+        <div className="modal-pro-header">
+          <h3><i className="fas fa-plus-circle"></i> Nueva Reparación</h3>
+          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+        </div>
 
-            {paso === 1 && (
-              <div>
-                <h6 className="mb-3">Paso 1: Toma una foto del recibo o ticket</h6>
-                {camaraError && (
-                  <div className="alert alert-warning mb-3">
-                    <i className="fas fa-exclamation-triangle me-2" />
-                    La cámara no está disponible. Usa <strong>Seleccionar archivo</strong> para subir una foto desde tu dispositivo.
-                  </div>
-                )}
-                <div className="position-relative bg-dark rounded overflow-hidden mb-3" style={{ minHeight: 250 }}>
-                  <video ref={videoRef} autoPlay playsInline muted className="w-100" style={{ maxHeight: 300, display: capturaLista || camaraError ? 'none' : 'block' }} />
-                  <canvas ref={canvasRef} className="d-none" />
-                  {imagenUrl && capturaLista && (
-                    <img src={imagenUrl} alt="Preview" className="w-100" style={{ maxHeight: 300, objectFit: 'contain' }} />
-                  )}
-                  {camaraError && !capturaLista && (
-                    <div className="position-absolute top-50 start-50 translate-middle text-center text-white">
-                      <i className="fas fa-camera-slash fa-3x mb-2 opacity-50" />
-                      <p className="mb-0">Selecciona una imagen de tu dispositivo</p>
-                    </div>
-                  )}
-                  <div className="position-absolute bottom-0 start-50 translate-middle-x mb-2 d-flex gap-2 flex-wrap justify-content-center">
-                    {!capturaLista && (
-                      <>
-                        {!camaraError && (
-                          <button type="button" className="btn btn-success" onClick={tomarFoto} disabled={analizando}>
-                            <i className="fas fa-camera" /> Tomar Foto
-                          </button>
-                        )}
-                        <input type="file" ref={fileInputRef} accept="image/*" className="d-none" onChange={handleFileChange} />
-                        <button type="button" className="btn btn-primary" onClick={() => fileInputRef.current?.click()} disabled={analizando}>
-                          <i className="fas fa-folder-open" /> {camaraError ? 'Seleccionar archivo' : 'Archivo'}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {(analizando || analizarMut.isPending) && (
-                  <div className="text-center py-3">
-                    <div className="spinner-border text-primary" />
-                    <p className="mt-2 mb-0">Analizando imagen con IA...</p>
-                  </div>
-                )}
-                {capturaLista && !analizando && !analizarMut.isPending && (
-                  <button type="button" className="btn btn-warning" onClick={reintentar}>
-                    <i className="fas fa-redo" /> Reintentar foto
+        <div className="modal-pro-body">
+          {error && <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {error}</div>}
+
+          {step === 'capture' && (
+            <div className="capture-step">
+              <p className="capture-instructions">
+                <i className="fas fa-magic"></i> Toma una foto del equipo y la IA extraerá los datos automáticamente
+              </p>
+              {cameraActive ? (
+                <div className="camera-container">
+                  <video ref={videoRef} autoPlay playsInline className="camera-preview" />
+                  <canvas ref={canvasRef} style={{ display: 'none' }} />
+                  <button className="btn-capture" onClick={capturePhoto} disabled={loading}>
+                    {loading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-camera"></i>}
                   </button>
-                )}
-              </div>
-            )}
+                </div>
+              ) : (
+                <div className="capture-options">
+                  <button className="capture-btn" onClick={startCamera}>
+                    <i className="fas fa-camera"></i>
+                    <span>Usar cámara</span>
+                  </button>
+                  <label className="capture-btn">
+                    <i className="fas fa-image"></i>
+                    <span>Subir imagen</span>
+                    <input type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} />
+                  </label>
+                  <button className="capture-btn skip" onClick={() => setStep('form')}>
+                    <i className="fas fa-keyboard"></i>
+                    <span>Sin imagen</span>
+                  </button>
+                </div>
+              )}
+              {loading && <div className="ai-loading"><i className="fas fa-brain fa-pulse"></i> Procesando con IA...</div>}
+            </div>
+          )}
 
-            {paso === 2 && (
-              <div>
-                <h6 className="mb-3">Paso 2: Completa la información</h6>
-                <div className="mb-2">
-                  <label className="form-label">Cliente</label>
-                  <input className="form-control" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+          {step === 'form' && (
+            <div className="edit-form">
+              <div className="form-row">
+                <div className="form-group">
+                  <label><i className="fas fa-user"></i> Propietario *</label>
+                  <input value={form.nombre_propietario} onChange={e => setForm({ ...form, nombre_propietario: e.target.value })}
+                    className={validationErrors.nombre ? 'error' : ''} autoFocus />
+                  {validationErrors.nombre && <span className="field-error">{validationErrors.nombre}</span>}
                 </div>
-                <div className="mb-2">
-                  <label className="form-label">Problema</label>
-                  <textarea className="form-control" rows={2} value={problema} onChange={(e) => setProblema(e.target.value)} />
+                <div className="form-group">
+                  <label><i className="fab fa-whatsapp"></i> WhatsApp</label>
+                  <input value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })}
+                    placeholder="+57 300 123 4567" className={validationErrors.whatsapp ? 'error' : ''} />
+                  {validationErrors.whatsapp && <span className="field-error">{validationErrors.whatsapp}</span>}
                 </div>
-                <div className="mb-2">
-                  <label className="form-label">WhatsApp (opcional)</label>
-                  <input className="form-control" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label><i className="fas fa-exclamation-circle"></i> Problema</label>
+                <textarea rows={3} value={form.problema} onChange={e => setForm({ ...form, problema: e.target.value })} placeholder="Describe el problema del equipo..." />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label><i className="fas fa-calendar"></i> Fecha límite *</label>
+                  <input type="date" value={form.fecha_limite} onChange={e => setForm({ ...form, fecha_limite: e.target.value })}
+                    className={validationErrors.fecha ? 'error' : ''} />
+                  {validationErrors.fecha && <span className="field-error">{validationErrors.fecha}</span>}
                 </div>
-                <div className="mb-2">
-                  <label className="form-label">Fecha límite</label>
-                  <input type="date" className="form-control" value={fechaLimite || defaultFecha} onChange={(e) => setFechaLimite(e.target.value)} />
-                </div>
-                <div className="mb-2">
-                  <label className="form-label">Tiene cargador</label>
-                  <select className="form-select" value={tieneCargador} onChange={(e) => setTieneCargador(e.target.value)}>
+                <div className="form-group">
+                  <label><i className="fas fa-plug"></i> Cargador</label>
+                  <select value={form.tiene_cargador} onChange={e => setForm({ ...form, tiene_cargador: e.target.value })}>
                     <option value="si">Sí</option>
                     <option value="no">No</option>
                   </select>
                 </div>
-                <button type="button" className="btn btn-outline-secondary mb-2" onClick={() => setPaso(1)}>
-                  Volver al paso 1
-                </button>
               </div>
-            )}
-          </div>
-          <div className="modal-footer">
-            <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-            {paso === 2 ? (
-              <button className="btn btn-primary" onClick={handleSubmit} disabled={createMut.isPending}>
-                {createMut.isPending ? 'Creando...' : 'Crear'}
-              </button>
-            ) : (
-              <button className="btn btn-primary" disabled={!imagenUrl || analizarMut.isPending} onClick={() => setPaso(2)}>
-                {analizarMut.isPending ? 'Analizando...' : 'Continuar'}
-              </button>
-            )}
-          </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label><i className="fas fa-flag"></i> Prioridad</label>
+                  <select value={form.prioridad} onChange={e => setForm({ ...form, prioridad: e.target.value })}>
+                    <option value="alta">🔴 Alta</option>
+                    <option value="media">🟡 Media</option>
+                    <option value="baja">🟢 Baja</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label><i className="fas fa-user-cog"></i> Asignar a</label>
+                  <select value={form.asignado_a} onChange={e => setForm({ ...form, asignado_a: e.target.value })}>
+                    <option value="">Sin asignar</option>
+                    {users.map((u: UserInfo) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group">
+                <label><i className="fas fa-wrench"></i> Notas técnicas</label>
+                <textarea rows={2} value={form.notas_tecnicas} onChange={e => setForm({ ...form, notas_tecnicas: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label><i className="fas fa-dollar-sign"></i> Costo estimado</label>
+                <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value })} placeholder="0" />
+              </div>
+              {allTags.length > 0 && (
+                <div className="form-group">
+                  <label><i className="fas fa-tags"></i> Etiquetas</label>
+                  <div className="tags-select">
+                    {allTags.map((tag: Tag) => (
+                      <button key={tag.id} type="button"
+                        className={`tag-chip-btn ${selectedTags.includes(tag.id) ? 'selected' : ''}`}
+                        style={{
+                          borderColor: tag.color, color: selectedTags.includes(tag.id) ? '#fff' : tag.color,
+                          background: selectedTags.includes(tag.id) ? tag.color : 'transparent'
+                        }}
+                        onClick={() => setSelectedTags(p => p.includes(tag.id) ? p.filter(i => i !== tag.id) : [...p, tag.id])}>
+                        {tag.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {form.imagen_url && (
+                <div className="preview-image">
+                  <img src={form.imagen_url} alt="Preview" />
+                  <button className="btn-del-sm" onClick={() => setForm({ ...form, imagen_url: '' })}><i className="fas fa-times"></i></button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
+        {step === 'form' && (
+          <div className="modal-pro-footer">
+            <button className="btn-cancel" onClick={() => setStep('capture')}>
+              <i className="fas fa-arrow-left"></i> Volver
+            </button>
+            <button className="btn-save" onClick={handleSubmit} disabled={createMut.isPending}>
+              {createMut.isPending ? <><i className="fas fa-spinner fa-spin"></i> Creando...</> : <><i className="fas fa-check"></i> Crear</>}
+            </button>
+          </div>
+        )}
       </div>
     </div>
-  )
+  );
 }

@@ -10,6 +10,19 @@ class Settings(BaseSettings):
     socketio_safe_mode: bool = True
     redis_url: str | None = None
 
+    # --- Auth (Mejora #6) ---
+    jwt_secret: str = "change-me-in-production-nanotronics-2024"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 480  # 8 horas
+
+    # --- S3 storage (Mejora #22) ---
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_endpoint_url: str = ""  # Para Cloudflare R2 u otros S3-compatible
+    use_s3_storage: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -25,7 +38,6 @@ class Settings(BaseSettings):
             if lista:
                 return (lista, None)
         if self.is_production:
-            # Fallback: permitir *.up.railway.app cuando ALLOWED_ORIGINS no está definido
             return ([], r"^https://[\w.-]+\.up\.railway\.app$")
         return ("*", None)
 

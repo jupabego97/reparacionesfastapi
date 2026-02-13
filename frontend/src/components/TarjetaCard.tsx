@@ -1,133 +1,145 @@
-import type { Tarjeta } from '../api/client'
-import { toWhatsAppUrl } from '../utils/whatsappUrl'
+import type { Tarjeta, KanbanColumn } from '../api/client';
 
 interface Props {
-  tarjeta: Tarjeta
-  onEditar: (t: Tarjeta) => void
-  onMover?: (t: Tarjeta, columna: string) => void
-  columnas?: readonly string[]
-  compacta?: boolean
+  tarjeta: Tarjeta;
+  columnas: KanbanColumn[];
+  onEdit: (t: Tarjeta) => void;
+  onDelete: (id: number) => void;
+  onMove: (id: number, newCol: string) => void;
+  compact?: boolean;
 }
 
-const ESTADO_LABEL: Record<string, string> = {
-  ingresado: 'Ingresado',
-  diagnosticada: 'En Diagnóstico',
-  para_entregar: 'Listos para Entregar',
-  listos: 'Completados',
+const PRIORITY_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
+  alta: { icon: 'fas fa-arrow-up', color: '#ef4444', label: 'Alta' },
+  media: { icon: 'fas fa-minus', color: '#f59e0b', label: 'Media' },
+  baja: { icon: 'fas fa-arrow-down', color: '#22c55e', label: 'Baja' },
+};
+
+function timeColor(days: number): string {
+  if (days <= 1) return '#22c55e';
+  if (days <= 3) return '#f59e0b';
+  if (days <= 7) return '#f97316';
+  return '#ef4444';
 }
 
-function escape(s: string | null): string {
-  if (!s) return ''
-  const d = document.createElement('div')
-  d.textContent = s
-  return d.innerHTML
+function isOverdue(fechaLimite: string | null): boolean {
+  if (!fechaLimite) return false;
+  return new Date(fechaLimite) < new Date();
 }
 
-export function TarjetaCard({ tarjeta, onEditar, onMover, columnas, compacta }: Props) {
-  const whatsappUrl = toWhatsAppUrl(tarjeta.whatsapp)
-  const fechaLimite = tarjeta.fecha_limite ? new Date(tarjeta.fecha_limite) : null
-  const hoy = new Date()
-  const vencida = fechaLimite && fechaLimite < hoy
-  const n = escape(tarjeta.nombre_propietario || '')
-  const p = escape(tarjeta.problema || '')
-  const nt = escape(tarjeta.notas_tecnicas || '')
+export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact }: Props) {
+  const t = tarjeta;
+  const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
+  const overdue = isOverdue(t.fecha_limite);
+  const daysColor = timeColor(t.dias_en_columna || 0);
+  const whatsUrl = t.whatsapp ? `https://wa.me/${t.whatsapp.replace(/\D/g, '')}` : null;
 
-  if (compacta) {
+  if (compact) {
     return (
-      <div
-        className="card repair-card border-start border-4 border-success mb-2"
-        data-id={tarjeta.id}
-        data-status={tarjeta.columna}
-      >
-        <div className="card-body py-2 px-3">
-          <div className="d-flex justify-content-between align-items-center">
-            <strong className="text-truncate flex-grow-1 me-2 mb-0">{n || 'Cliente'}</strong>
-            <div className="d-flex gap-1">
-              <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => onEditar(tarjeta)} title="Editar">
-                <i className="fas fa-edit" />
-              </button>
-              {whatsappUrl && (
-                <a href={whatsappUrl} target="_blank" rel="noreferrer" className="btn btn-sm btn-success" title="WhatsApp">
-                  <i className="fab fa-whatsapp" />
-                </a>
-              )}
-            </div>
+      <div className={`tarjeta-card compact ${overdue ? 'overdue' : ''}`} onClick={() => onEdit(t)}>
+        <div className="tarjeta-compact-row">
+          <span className="priority-dot" style={{ background: prio.color }}></span>
+          <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
+          {t.asignado_nombre && <span className="assigned-badge" title={t.asignado_nombre}>{t.asignado_nombre[0]}</span>}
+          <div className="tarjeta-compact-actions">
+            {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
+            {whatsUrl && <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-sm" onClick={e => e.stopPropagation()}><i className="fab fa-whatsapp"></i></a>}
           </div>
         </div>
       </div>
-    )
+    );
   }
 
-  const borderClass =
-    tarjeta.columna === 'ingresado' ? 'border-primary' :
-    tarjeta.columna === 'diagnosticada' ? 'border-warning' :
-    tarjeta.columna === 'para_entregar' ? 'border-info' : 'border-success'
-
   return (
-    <div
-      className={`card repair-card border-start border-4 ${borderClass} mb-2`}
-      data-id={tarjeta.id}
-      data-status={tarjeta.columna}
-    >
-      <div className="card-header d-flex justify-content-between align-items-center py-2 px-2">
-        <strong className="text-truncate flex-grow-1 me-2">{n || 'Cliente'}</strong>
-        {whatsappUrl && (
-          <a href={whatsappUrl} target="_blank" rel="noreferrer" className="btn btn-sm btn-success" title="WhatsApp">
-            <i className="fab fa-whatsapp" /> <span className="d-none d-md-inline">WhatsApp</span>
-          </a>
-        )}
-      </div>
-      <div className="card-body py-2 px-2">
-        <p className="card-text small mb-1">{p || '—'}</p>
-        <div className="small text-muted mb-1">
-          <i className="fas fa-calendar-alt me-1" />
-          <span className={vencida ? 'text-danger fw-bold' : ''}>{tarjeta.fecha_limite || '—'}</span>
+    <div className={`tarjeta-card ${overdue ? 'overdue' : ''}`}>
+      {/* Priority strip */}
+      <div className="priority-strip" style={{ background: prio.color }}></div>
+
+      {/* Header */}
+      <div className="tarjeta-header">
+        <div className="tarjeta-title-row">
+          <i className={prio.icon} style={{ color: prio.color, fontSize: '0.75rem' }} title={`Prioridad ${prio.label}`}></i>
+          <strong className="tarjeta-name" onClick={() => onEdit(t)}>{t.nombre_propietario || 'Cliente'}</strong>
         </div>
-        {tarjeta.tiene_cargador === 'si' ? (
-          <span className="badge bg-success me-1"><i className="fas fa-plug me-1" />Con cargador</span>
-        ) : (
-          <span className="badge bg-warning text-dark"><i className="fas fa-plug-circle-exclamation me-1" />Sin cargador</span>
-        )}
-        {nt && (
-          <div className="mt-2 p-2 bg-light border-start border-primary border-3 rounded small">
-            <small className="text-muted d-block mb-1"><i className="fas fa-tools" /> Diagnóstico:</small>
-            <small className="text-dark">{nt}</small>
-          </div>
-        )}
-        {tarjeta.imagen_url && (tarjeta.imagen_url.startsWith('data:') || tarjeta.imagen_url.startsWith('http')) && (
-          <div className="mt-2">
-            <img
-              src={tarjeta.imagen_url}
-              alt=""
-              className="img-fluid rounded"
-              style={{ maxHeight: 120, objectFit: 'cover', cursor: 'pointer' }}
-              loading="lazy"
-              onClick={() => window.open(tarjeta.imagen_url!, '_blank')}
-            />
-          </div>
-        )}
-      </div>
-      <div className="card-footer bg-transparent border-0 pt-0 pb-2 px-2">
-        <div className="d-flex justify-content-between align-items-center">
-          {columnas && onMover ? (
-            <select
-              className="form-select form-select-sm"
-              style={{ maxWidth: 140 }}
-              value={tarjeta.columna}
-              onChange={(e) => onMover(tarjeta, e.target.value)}
-            >
-              {columnas.map((c) => (
-                <option key={c} value={c}>{ESTADO_LABEL[c] ?? c}</option>
-              ))}
-            </select>
-          ) : (
-            <span />
+        <div className="tarjeta-meta">
+          {t.asignado_nombre && (
+            <span className="assigned-badge" title={`Asignado: ${t.asignado_nombre}`} style={{ background: '#6366f1' }}>
+              {t.asignado_nombre.split(' ').map(w => w[0]).join('').slice(0, 2)}
+            </span>
           )}
-          <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => onEditar(tarjeta)}>
-            <i className="fas fa-edit me-1" /> Editar
+          {/* Mejora #16: Tiempo en columna */}
+          {t.dias_en_columna > 0 && (
+            <span className="days-badge" style={{ color: daysColor }} title={`${t.dias_en_columna} días en esta columna`}>
+              <i className="fas fa-clock"></i> {t.dias_en_columna}d
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Problem */}
+      {t.problema && t.problema !== 'Sin descripción' && (
+        <p className="tarjeta-problem">{t.problema.length > 80 ? t.problema.slice(0, 80) + '...' : t.problema}</p>
+      )}
+
+      {/* Tags */}
+      {t.tags && t.tags.length > 0 && (
+        <div className="tarjeta-tags">
+          {t.tags.map(tag => (
+            <span key={tag.id} className="tag-chip" style={{ background: tag.color + '22', color: tag.color, borderColor: tag.color + '44' }}>
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Subtasks progress bar (Mejora #3) */}
+      {t.subtasks_total > 0 && (
+        <div className="subtasks-progress">
+          <div className="subtasks-bar">
+            <div className="subtasks-fill" style={{ width: `${(t.subtasks_done / t.subtasks_total) * 100}%` }}></div>
+          </div>
+          <span className="subtasks-text">{t.subtasks_done}/{t.subtasks_total}</span>
+        </div>
+      )}
+
+      {/* Image thumbnail */}
+      {t.imagen_url && (
+        <img src={t.imagen_url} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
+      )}
+
+      {/* Footer */}
+      <div className="tarjeta-footer">
+        <div className="tarjeta-footer-left">
+          {t.fecha_limite && (
+            <span className={`date-badge ${overdue ? 'overdue' : ''}`}>
+              <i className="fas fa-calendar-alt"></i> {t.fecha_limite}
+            </span>
+          )}
+          {t.tiene_cargador === 'si' && <span className="charger-badge" title="Con cargador"><i className="fas fa-plug"></i></span>}
+          {t.notas_tecnicas && <span className="notes-badge" title={t.notas_tecnicas}><i className="fas fa-wrench"></i></span>}
+          {t.comments_count > 0 && <span className="comments-badge"><i className="fas fa-comment"></i> {t.comments_count}</span>}
+          {t.costo_estimado != null && (
+            <span className="cost-badge" title={`Estimado: $${t.costo_estimado.toLocaleString()}`}>
+              <i className="fas fa-dollar-sign"></i>
+            </span>
+          )}
+        </div>
+        <div className="tarjeta-footer-right">
+          {whatsUrl && (
+            <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-action btn-wa" title="WhatsApp">
+              <i className="fab fa-whatsapp"></i>
+            </a>
+          )}
+          <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar">
+            <i className="fas fa-pen"></i>
           </button>
+          <select className="move-select" value={t.columna}
+            onChange={e => { e.stopPropagation(); onMove(t.id, e.target.value); }}
+            onClick={e => e.stopPropagation()}>
+            {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
+          </select>
         </div>
       </div>
     </div>
-  )
+  );
 }

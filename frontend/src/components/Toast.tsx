@@ -1,26 +1,27 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react';
 
 interface Props {
-  message: string
-  type: 'success' | 'warning' | 'info'
-  onClose: () => void
+  message: string;
+  type: 'success' | 'warning' | 'info';
+  onClose: () => void;
+  duration?: number;
 }
 
-export function Toast({ message, type, onClose }: Props) {
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
+export default function Toast({ message, type, onClose, duration = 4000 }: Props) {
   useEffect(() => {
-    const t = setTimeout(() => onCloseRef.current(), 4000)
-    return () => clearTimeout(t)
-  }, [message, type])
+    const timer = setTimeout(onClose, duration);
+    return () => clearTimeout(timer);
+  }, [onClose, duration]);
 
-  const bg = type === 'success' ? 'bg-success' : type === 'warning' ? 'bg-warning' : 'bg-info'
+  const icons = { success: 'fas fa-check-circle', warning: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle' };
+
   return (
-    <div
-      className={`position-fixed bottom-0 end-0 m-3 p-3 rounded shadow ${bg} text-white`}
-      role="alert"
-    >
-      {message}
+    <div className="toast-container">
+      <div className={`toast ${type}`}>
+        <i className={icons[type]}></i>
+        <span>{message}</span>
+        <button className="close-toast" onClick={onClose}><i className="fas fa-times"></i></button>
+      </div>
     </div>
-  )
+  );
 }

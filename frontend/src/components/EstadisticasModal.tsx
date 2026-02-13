@@ -1,198 +1,146 @@
-import { useQuery } from '@tanstack/react-query'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js'
-import { Bar, Doughnut } from 'react-chartjs-2'
-import { api } from '../api/client'
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../api/client';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
+import { Bar, Doughnut } from 'react-chartjs-2';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
-interface Props {
-  show: boolean
-  onClose: () => void
-}
+interface Props { onClose: () => void; }
 
-export function EstadisticasModal({ show, onClose }: Props) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['estadisticas'],
-    queryFn: () => api.getEstadisticas(),
-    enabled: show,
-  })
+export default function EstadisticasModal({ onClose }: Props) {
+  const { data: stats, isLoading } = useQuery({ queryKey: ['estadisticas'], queryFn: api.getEstadisticas });
 
-  if (!show) return null
-
-  const d = data as {
-    total_reparaciones?: number
-    completadas_ultimo_mes?: number
-    pendientes?: number
-    con_notas_tecnicas?: number
-    totales_por_estado?: Record<string, number>
-    tasa_cargador?: { con_cargador: number; sin_cargador: number }
-    top_problemas?: { problema: string; cantidad: number }[]
-    tiempos_promedio_dias?: Record<string, number>
-    generado_at?: string
-  } | undefined
-
-  const chartEstados = d?.totales_por_estado && {
-    labels: ['Ingresado', 'En Diagnóstico', 'Para Entregar', 'Completados'],
-    datasets: [{
-      label: 'Cantidad',
-      data: [
-        d.totales_por_estado.ingresado ?? 0,
-        d.totales_por_estado.diagnosticada ?? 0,
-        d.totales_por_estado.para_entregar ?? 0,
-        d.totales_por_estado.listos ?? 0,
-      ],
-      backgroundColor: [
-        'rgba(3, 105, 161, 0.7)',
-        'rgba(146, 64, 14, 0.7)',
-        'rgba(91, 33, 182, 0.7)',
-        'rgba(6, 95, 70, 0.7)',
-      ],
-    }],
+  if (isLoading || !stats) {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-pro modal-lg" onClick={e => e.stopPropagation()}>
+          <div className="modal-pro-header"><h3><i className="fas fa-chart-bar"></i> Estadísticas</h3><button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button></div>
+          <div className="modal-pro-body"><div className="app-loading"><div className="spinner-large"></div></div></div>
+        </div>
+      </div>
+    );
   }
 
-  const chartCargador = d?.tasa_cargador && {
-    labels: ['Con Cargador', 'Sin Cargador'],
-    datasets: [{
-      data: [d.tasa_cargador.con_cargador, d.tasa_cargador.sin_cargador],
-      backgroundColor: ['rgba(16, 185, 129, 0.7)', 'rgba(239, 68, 68, 0.7)'],
-    }],
-  }
+  const s = stats as any;
+  const estados = s.totales_por_estado || {};
+  const tiempos = s.tiempos_promedio_dias || {};
+  const prioridad = s.distribucion_prioridad || {};
+  const financiero = s.resumen_financiero || {};
+
+  const barData = {
+    labels: Object.keys(estados).map((k: string) => ({ ingresado: 'Ingresado', diagnosticada: 'Diagnóstico', para_entregar: 'Para entregar', listos: 'Completados' }[k] || k)),
+    datasets: [{ label: 'Cantidad', data: Object.values(estados), backgroundColor: ['#0ea5e9', '#f59e0b', '#8b5cf6', '#22c55e'], borderRadius: 8 }],
+  };
+
+  const chargerData = {
+    labels: ['Con cargador', 'Sin cargador'],
+    datasets: [{ data: [s.tasa_cargador?.con_cargador || 0, s.tasa_cargador?.sin_cargador || 0], backgroundColor: ['#22c55e', '#ef4444'], borderWidth: 0 }],
+  };
+
+  const prioData = {
+    labels: ['Alta', 'Media', 'Baja'],
+    datasets: [{ data: [prioridad.alta || 0, prioridad.media || 0, prioridad.baja || 0], backgroundColor: ['#ef4444', '#f59e0b', '#22c55e'], borderWidth: 0 }],
+  };
 
   return (
-    <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog modal-xl">
-        <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title"><i className="fas fa-chart-bar me-2" /> Estadísticas del Sistema</h5>
-            <button type="button" className="btn-close" onClick={onClose} aria-label="Cerrar" />
-          </div>
-          <div className="modal-body">
-            {isLoading && (
-              <div className="text-center py-5">
-                <div className="spinner-border text-primary" role="status" />
-                <p className="mt-3 text-muted">Cargando estadísticas...</p>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-pro modal-lg" onClick={e => e.stopPropagation()}>
+        <div className="modal-pro-header">
+          <h3><i className="fas fa-chart-bar"></i> Estadísticas del Sistema</h3>
+          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+        </div>
+        <div className="modal-pro-body">
+          {/* KPIs */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            {[
+              { label: 'Total', value: s.total_reparaciones || 0, icon: 'fas fa-tools', color: '#0ea5e9' },
+              { label: 'Completadas/mes', value: s.completadas_ultimo_mes || 0, icon: 'fas fa-check-double', color: '#22c55e' },
+              { label: 'Pendientes', value: s.pendientes || 0, icon: 'fas fa-clock', color: '#f59e0b' },
+              { label: 'Con diagnóstico', value: s.con_notas_tecnicas || 0, icon: 'fas fa-stethoscope', color: '#8b5cf6' },
+            ].map((kpi, i) => (
+              <div key={i} style={{ background: 'var(--input-bg)', borderRadius: 'var(--radius-sm)', padding: '1rem', textAlign: 'center', border: '1px solid var(--border)' }}>
+                <i className={kpi.icon} style={{ color: kpi.color, fontSize: '1.3rem' }}></i>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: '0.3rem' }}>{kpi.value}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{kpi.label}</div>
               </div>
-            )}
-            {error && (
-              <div className="alert alert-danger">Error al cargar estadísticas</div>
-            )}
-            {d && !isLoading && (
-              <>
-                <div className="row mb-4">
-                  <div className="col-md-3">
-                    <div className="card text-center">
-                      <div className="card-body">
-                        <h3 className="text-primary">{d.total_reparaciones ?? 0}</h3>
-                        <p className="text-muted mb-0">Total Reparaciones</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3">
-                    <div className="card text-center">
-                      <div className="card-body">
-                        <h3 className="text-success">{d.completadas_ultimo_mes ?? 0}</h3>
-                        <p className="text-muted mb-0">Completadas (mes)</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3">
-                    <div className="card text-center">
-                      <div className="card-body">
-                        <h3 className="text-warning">{d.pendientes ?? 0}</h3>
-                        <p className="text-muted mb-0">Pendientes</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3">
-                    <div className="card text-center">
-                      <div className="card-body">
-                        <h3 className="text-info">{d.con_notas_tecnicas ?? 0}</h3>
-                        <p className="text-muted mb-0">Con Diagnóstico</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="row">
-                  <div className="col-md-6 mb-4">
-                    <div className="card">
-                      <div className="card-header"><strong>Distribución por Estado</strong></div>
-                      <div className="card-body">{chartEstados && <Bar data={chartEstados} options={{ responsive: true, scales: { y: { beginAtZero: true } } }} />}</div>
-                    </div>
-                  </div>
-                  <div className="col-md-6 mb-4">
-                    <div className="card">
-                      <div className="card-header"><strong>Reparaciones con/sin Cargador</strong></div>
-                      <div className="card-body">{chartCargador && <Doughnut data={chartCargador} options={{ responsive: true, plugins: { legend: { position: 'bottom' } } }} />}</div>
-                    </div>
-                  </div>
-                </div>
-                {(d.top_problemas?.length ?? 0) > 0 && (
-                  <div className="card mb-4">
-                    <div className="card-header"><strong>Top 5 Problemas Más Frecuentes</strong></div>
-                    <div className="card-body">
-                      {d.top_problemas!.map((item, i) => {
-                        const max = d.top_problemas![0]?.cantidad ?? 1
-                        const progress = (item.cantidad / max) * 100
-                        return (
-                          <div key={i} className="mb-3">
-                            <div className="d-flex justify-content-between mb-1">
-                              <span><strong>{i + 1}.</strong> {item.problema}</span>
-                              <span className="badge bg-primary">{item.cantidad}</span>
-                            </div>
-                            <div className="progress">
-                              <div className="progress-bar" style={{ width: `${progress}%` }} />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-                {d.tiempos_promedio_dias && (
-                  <div className="card">
-                    <div className="card-header"><strong>Tiempos Promedio por Estado</strong></div>
-                    <div className="card-body">
-                      <div className="row">
-                        <div className="col-md-4">
-                          <div className="text-center p-3 bg-light rounded">
-                            <h5 className="text-primary">{d.tiempos_promedio_dias.ingresado_a_diagnosticada ?? 0} días</h5>
-                            <small className="text-muted">Ingresado → Diagnóstico</small>
-                          </div>
-                        </div>
-                        <div className="col-md-4">
-                          <div className="text-center p-3 bg-light rounded">
-                            <h5 className="text-warning">{d.tiempos_promedio_dias.diagnosticada_a_para_entregar ?? 0} días</h5>
-                            <small className="text-muted">Diagnóstico → Para Entregar</small>
-                          </div>
-                        </div>
-                        <div className="col-md-4">
-                          <div className="text-center p-3 bg-light rounded">
-                            <h5 className="text-success">{d.tiempos_promedio_dias.para_entregar_a_entregados ?? 0} días</h5>
-                            <small className="text-muted">Para Entregar → Completado</small>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
+            ))}
           </div>
-          <div className="modal-footer">
-            <small className="text-muted me-auto">{d?.generado_at ? `Generado: ${d.generado_at}` : ''}</small>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cerrar</button>
+
+          {/* Charts */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+            <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}>Distribución por Estado</h5>
+              <Bar data={barData} options={{ responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }} />
+            </div>
+            <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}>Cargador</h5>
+              <div style={{ maxWidth: 200, margin: '0 auto' }}>
+                <Doughnut data={chargerData} options={{ responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }} />
+              </div>
+            </div>
           </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+            <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}>Distribución por Prioridad</h5>
+              <div style={{ maxWidth: 200, margin: '0 auto' }}>
+                <Doughnut data={prioData} options={{ responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }} />
+              </div>
+            </div>
+            <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}>Tiempos Promedio (días)</h5>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.5rem 0' }}>
+                {[
+                  { label: 'Ingresado → Diagnóstico', value: tiempos.ingresado_a_diagnosticada || 0, color: '#0ea5e9' },
+                  { label: 'Diagnóstico → Listo', value: tiempos.diagnosticada_a_para_entregar || 0, color: '#f59e0b' },
+                  { label: 'Listo → Entregado', value: tiempos.para_entregar_a_entregados || 0, color: '#22c55e' },
+                ].map((t, i) => (
+                  <div key={i}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.2rem' }}>
+                      <span>{t.label}</span><strong>{t.value}d</strong>
+                    </div>
+                    <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(t.value * 10, 100)}%`, background: t.color, borderRadius: 3 }}></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Financial summary */}
+          {(financiero.total_estimado > 0 || financiero.total_cobrado > 0) && (
+            <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '1rem' }}>
+              <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}><i className="fas fa-dollar-sign"></i> Resumen Financiero</h5>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', textAlign: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f59e0b' }}>${financiero.total_estimado?.toLocaleString()}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total Estimado</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#22c55e' }}>${financiero.total_cobrado?.toLocaleString()}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total Cobrado</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Top Problems */}
+          {s.top_problemas?.length > 0 && (
+            <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}>Top 5 Problemas</h5>
+              {s.top_problemas.map((p: any, i: number) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                  <span style={{ fontSize: '0.8rem', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {i + 1}. {p.problema}
+                  </span>
+                  <strong style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>{p.cantidad}</strong>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
-  )
+  );
 }
