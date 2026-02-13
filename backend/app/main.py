@@ -81,14 +81,19 @@ def create_app() -> FastAPI:
                 loguru.logger.info(f"[{request_id}] {request.method} {path} {elapsed:.2f}s")
         return response
 
-    origins = settings.get_cors_origins()
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins if isinstance(origins, list) else ["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    origins, origin_regex = settings.get_cors_origins()
+    cors_kw: dict = {
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+        "expose_headers": ["*"],
+    }
+    if origin_regex:
+        cors_kw["allow_origin_regex"] = origin_regex
+        cors_kw["allow_origins"] = origins if isinstance(origins, list) else []
+    else:
+        cors_kw["allow_origins"] = origins if isinstance(origins, list) else ["*"]
+    app.add_middleware(CORSMiddleware, **cors_kw)
 
     app.include_router(health.router)
     app.include_router(tarjetas.router)

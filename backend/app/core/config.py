@@ -18,10 +18,16 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment == "production"
 
-    def get_cors_origins(self) -> list[str] | str:
-        if not self.allowed_origins or not self.allowed_origins.strip():
-            return "*"
-        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()] or "*"
+    def get_cors_origins(self) -> tuple[list[str] | str, str | None]:
+        """Retorna (origins, origin_regex). Si ALLOWED_ORIGINS vacío en prod, regex para Railway."""
+        if self.allowed_origins and self.allowed_origins.strip():
+            lista = [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+            if lista:
+                return (lista, None)
+        if self.is_production:
+            # Fallback: permitir *.up.railway.app cuando ALLOWED_ORIGINS no está definido
+            return ([], r"^https://[\w.-]+\.up\.railway\.app$")
+        return ("*", None)
 
 
 @lru_cache
