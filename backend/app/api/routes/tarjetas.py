@@ -133,10 +133,15 @@ def get_tarjetas(
     # Mejora #5: Ordenar por posición dentro de cada estado, luego por prioridad
     q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
 
-    if page is None and per_page is None:
-        items = q.all()
-        data = [_enrich_tarjeta(t, db, include_image=include_image) for t in items]
-        return JSONResponse(content=data, headers=CACHE_HEADERS)
+    try:
+        if page is None and per_page is None:
+            items = q.all()
+            data = [_enrich_tarjeta(t, db, include_image=include_image) for t in items]
+            return JSONResponse(content=data, headers=CACHE_HEADERS)
+    except Exception as e:
+        from loguru import logger
+        logger.error(f"Error in GET /api/tarjetas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
     per_page = min(per_page or 50, 100)
     page = page or 1

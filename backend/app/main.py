@@ -74,36 +74,57 @@ def _auto_migrate_columns():
 
         # Solo migrar si la tabla repair_cards existe
         if "repair_cards" not in inspector.get_table_names():
+            logger.info("repair_cards table does not exist yet, skipping migration")
             return
 
         existing = {c["name"] for c in inspector.get_columns("repair_cards")}
+        logger.info(f"Existing columns: {sorted(existing)}")
+
+        # Renombrar columnas mal nombradas de deploys anteriores
+        renames = [
+            ("prioridad", "priority"),
+            ("asignado_nombre", "assigned_name"),
+            ("costo_estimado", "estimated_cost"),
+            ("costo_final", "final_cost"),
+            ("notas_costo", "cost_notes"),
+        ]
+        if dialect == "postgresql":
+            for old_name, new_name in renames:
+                if old_name in existing and new_name not in existing:
+                    db.execute(text(f"ALTER TABLE repair_cards RENAME COLUMN {old_name} TO {new_name}"))
+                    existing.discard(old_name)
+                    existing.add(new_name)
+                    logger.info(f"Renamed column: {old_name} -> {new_name}")
+
+        # Agregar columnas faltantes
         migrations = [
             ("priority", "VARCHAR(20) DEFAULT 'media'"),
             ("position", "INTEGER DEFAULT 0"),
             ("assigned_to", "INTEGER"),
             ("assigned_name", "VARCHAR(200)"),
-            ("estimated_cost", "FLOAT"),
-            ("final_cost", "FLOAT"),
+            ("estimated_cost", "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"),
+            ("final_cost", "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"),
             ("cost_notes", "TEXT"),
             ("deleted_at", "TIMESTAMP"),
         ]
 
         for col_name, col_type in migrations:
             if col_name not in existing:
-                if dialect == "postgresql":
-                    db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-                else:
-                    # SQLite: no tiene IF NOT EXISTS para ADD COLUMN
-                    try:
+                try:
+                    if dialect == "postgresql":
+                        db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                    else:
                         db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN {col_name} {col_type}"))
-                    except Exception:
-                        pass  # Column already exists
-                logger.info(f"Migrated: repair_cards.{col_name} ({col_type})")
+                    logger.info(f"Added column: repair_cards.{col_name} ({col_type})")
+                except Exception as col_err:
+                    logger.warning(f"Could not add column {col_name}: {col_err}")
 
         db.commit()
-        logger.info("Auto-migration completed")
+        # Verify
+        updated = {c["name"] for c in inspector.get_columns("repair_cards")}
+        logger.info(f"Migration done. Columns now: {sorted(updated)}")
     except Exception as e:
-        logger.warning(f"Auto-migration warning: {e}")
+        logger.error(f"Auto-migration error: {e}")
         db.rollback()
     finally:
         db.close()
