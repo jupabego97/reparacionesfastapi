@@ -91,10 +91,16 @@ def _auto_migrate_columns():
         if dialect == "postgresql":
             for old_name, new_name in renames:
                 if old_name in existing and new_name not in existing:
+                    # Rename old to new
                     db.execute(text(f"ALTER TABLE repair_cards RENAME COLUMN {old_name} TO {new_name}"))
                     existing.discard(old_name)
                     existing.add(new_name)
                     logger.info(f"Renamed column: {old_name} -> {new_name}")
+                elif old_name in existing and new_name in existing:
+                    # Both exist — drop the old duplicate
+                    db.execute(text(f"ALTER TABLE repair_cards DROP COLUMN {old_name}"))
+                    existing.discard(old_name)
+                    logger.info(f"Dropped duplicate column: {old_name} (keeping {new_name})")
 
         # Agregar columnas faltantes
         migrations = [

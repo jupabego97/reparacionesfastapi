@@ -61,15 +61,20 @@ def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> d
     d["comments_count"] = db.query(Comment).filter(Comment.tarjeta_id == t.id).count()
 
     # Tiempo en columna actual (Mejora #16)
-    if t.status == "ingresado" and t.ingresado_date:
-        d["dias_en_columna"] = (datetime.now(timezone.utc) - t.ingresado_date).days
-    elif t.status == "diagnosticada" and t.diagnosticada_date:
-        d["dias_en_columna"] = (datetime.now(timezone.utc) - t.diagnosticada_date).days
-    elif t.status == "para_entregar" and t.para_entregar_date:
-        d["dias_en_columna"] = (datetime.now(timezone.utc) - t.para_entregar_date).days
-    elif t.status == "listos" and t.entregados_date:
-        d["dias_en_columna"] = (datetime.now(timezone.utc) - t.entregados_date).days
-    else:
+    # Usar datetime naive para comparar con timestamps sin timezone de PostgreSQL
+    now = datetime.utcnow()
+    try:
+        if t.status == "ingresado" and t.ingresado_date:
+            d["dias_en_columna"] = (now - t.ingresado_date).days
+        elif t.status == "diagnosticada" and t.diagnosticada_date:
+            d["dias_en_columna"] = (now - t.diagnosticada_date).days
+        elif t.status == "para_entregar" and t.para_entregar_date:
+            d["dias_en_columna"] = (now - t.para_entregar_date).days
+        elif t.status == "listos" and t.entregados_date:
+            d["dias_en_columna"] = (now - t.entregados_date).days
+        else:
+            d["dias_en_columna"] = 0
+    except Exception:
         d["dias_en_columna"] = 0
 
     return d
