@@ -172,8 +172,7 @@ export const api = {
     if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
     if (params?.tag != null) search.set('tag', String(params.tag));
     const res = await fetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
-      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', ...authHeaders() },
-      cache: 'no-store',
+      headers: authHeaders(),
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();

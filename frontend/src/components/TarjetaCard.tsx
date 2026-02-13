@@ -32,7 +32,10 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
   const daysColor = timeColor(t.dias_en_columna || 0);
-  const whatsUrl = t.whatsapp ? `https://wa.me/${t.whatsapp.replace(/\D/g, '')}` : null;
+  const whatsNum = t.whatsapp ? t.whatsapp.replace(/\D/g, '') : null;
+  const whatsUrl = whatsNum
+    ? `https://wa.me/${whatsNum}?text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparación.`.trim())}`
+    : null;
 
   if (compact) {
     return (
@@ -43,7 +46,7 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
           {t.asignado_nombre && <span className="assigned-badge" title={t.asignado_nombre}>{t.asignado_nombre[0]}</span>}
           <div className="tarjeta-compact-actions">
             {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
-            {whatsUrl && <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-sm" onClick={e => e.stopPropagation()}><i className="fab fa-whatsapp"></i></a>}
+            {whatsUrl && <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-sm" onClick={e => e.stopPropagation()} title="WhatsApp"><i className="fab fa-whatsapp"></i></a>}
           </div>
         </div>
       </div>
@@ -126,8 +129,8 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
         </div>
         <div className="tarjeta-footer-right">
           {whatsUrl && (
-            <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-action btn-wa" title="WhatsApp">
-              <i className="fab fa-whatsapp"></i>
+            <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-action" title="Escribir por WhatsApp" onClick={e => e.stopPropagation()}>
+              <i className="fab fa-whatsapp"></i> WA
             </a>
           )}
           <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar">
