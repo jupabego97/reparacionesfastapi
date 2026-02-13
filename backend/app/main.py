@@ -24,8 +24,10 @@ from app.api.routes.multimedia import executor
 async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_logging(settings.environment)
-    # Crear tablas si no existen
+    # Crear tablas NUEVAS si no existen (no altera columnas en tablas existentes)
     Base.metadata.create_all(bind=engine)
+    # Migrar columnas faltantes en tablas existentes
+    _auto_migrate_columns()
     # Crear admin por defecto
     from app.core.database import SessionLocal
     from app.services.auth_service import create_default_admin
@@ -57,6 +59,54 @@ async def lifespan(app: FastAPI):
             sys.stderr.write(f"Warning: sequence fix failed: {e}\n")
     yield
     executor.shutdown(wait=True)
+
+
+def _auto_migrate_columns():
+    """Añade columnas faltantes a tablas existentes (PostgreSQL: IF NOT EXISTS)."""
+    from sqlalchemy import text, inspect
+    from app.core.database import SessionLocal
+    from loguru import logger
+
+    db = SessionLocal()
+    try:
+        dialect = db.get_bind().dialect.name
+        inspector = inspect(db.get_bind())
+
+        # Solo migrar si la tabla repair_cards existe
+        if "repair_cards" not in inspector.get_table_names():
+            return
+
+        existing = {c["name"] for c in inspector.get_columns("repair_cards")}
+        migrations = [
+            ("prioridad", "VARCHAR(20) DEFAULT 'media'"),
+            ("position", "INTEGER DEFAULT 0"),
+            ("assigned_to", "INTEGER"),
+            ("asignado_nombre", "VARCHAR(200)"),
+            ("costo_estimado", "FLOAT"),
+            ("costo_final", "FLOAT"),
+            ("notas_costo", "TEXT"),
+            ("deleted_at", "TIMESTAMP"),
+        ]
+
+        for col_name, col_type in migrations:
+            if col_name not in existing:
+                if dialect == "postgresql":
+                    db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                else:
+                    # SQLite: no tiene IF NOT EXISTS para ADD COLUMN
+                    try:
+                        db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN {col_name} {col_type}"))
+                    except Exception:
+                        pass  # Column already exists
+                logger.info(f"Migrated: repair_cards.{col_name} ({col_type})")
+
+        db.commit()
+        logger.info("Auto-migration completed")
+    except Exception as e:
+        logger.warning(f"Auto-migration warning: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def create_app() -> FastAPI:
