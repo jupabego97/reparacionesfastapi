@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 
@@ -29,13 +29,19 @@ def get_tarjetas(
 ):
     include_image = light != 1
     if page is None and per_page is None:
-        items = db.query(RepairCard).order_by(RepairCard.start_date.desc()).all()
+        q = db.query(RepairCard)
+        if not include_image:
+            q = q.options(defer(RepairCard.image_url))
+        items = q.order_by(RepairCard.start_date.desc()).all()
         data = [t.to_dict(include_image=include_image) for t in items]
         return JSONResponse(content=data, headers=CACHE_HEADERS)
 
     per_page = min(per_page or 50, 100)
     page = page or 1
-    q = db.query(RepairCard).order_by(RepairCard.start_date.desc())
+    q = db.query(RepairCard)
+    if not include_image:
+        q = q.options(defer(RepairCard.image_url))
+    q = q.order_by(RepairCard.start_date.desc())
     total = q.count()
     items = q.offset((page - 1) * per_page).limit(per_page).all()
     data = {

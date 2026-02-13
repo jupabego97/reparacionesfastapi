@@ -1,16 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
-import { io } from 'socket.io-client'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { io, type Socket } from 'socket.io-client'
 import { api, API_BASE, type Tarjeta } from './api/client'
 import { useDebounce } from './hooks/useDebounce'
 import { filtrarTarjetas, type Filtros } from './utils/filtrarTarjetas'
 import { KanbanBoard } from './components/KanbanBoard'
 import { BusquedaFiltros } from './components/BusquedaFiltros'
 import { ConexionBadge } from './components/ConexionBadge'
-import { NuevaTarjetaModal } from './components/NuevaTarjetaModal'
-import { EstadisticasModal } from './components/EstadisticasModal'
-import { ExportarModal } from './components/ExportarModal'
 import { Toast } from './components/Toast'
+
+const NuevaTarjetaModal = lazy(() => import('./components/NuevaTarjetaModal').then(m => ({ default: m.NuevaTarjetaModal })))
+const EstadisticasModal = lazy(() => import('./components/EstadisticasModal').then(m => ({ default: m.EstadisticasModal })))
+const ExportarModal = lazy(() => import('./components/ExportarModal').then(m => ({ default: m.ExportarModal })))
 
 const COLUMNAS = ['ingresado', 'diagnosticada', 'para_entregar', 'listos'] as const
 
@@ -37,17 +38,33 @@ function App() {
   const filtrosCompletos = useMemo(() => ({ ...filtros, busqueda: debouncedBusqueda }), [filtros, debouncedBusqueda])
   const tarjetasFiltradas = useMemo(() => filtrarTarjetas(tarjetas, filtrosCompletos), [tarjetas, filtrosCompletos])
 
+  // Cargar tarjetas sin imágenes (rápido), luego completo en segundo plano
   const { data, refetch, isLoading, isError, error } = useQuery({
     queryKey: ['tarjetas'],
     queryFn: async () => {
-      const res = await api.getTarjetas()
+      const res = await api.getTarjetas({ light: 1 })
       const list = Array.isArray(res) ? res : (res as { tarjetas: Tarjeta[] }).tarjetas
       return list ?? []
     },
   })
 
   useEffect(() => {
-    if (data) setTarjetas(data)
+    if (data) {
+      setTarjetas(data)
+      // Cargar imágenes en segundo plano después de pintar
+      const id = requestIdleCallback?.(() => {
+        api.getTarjetas().then(full => {
+          const list = Array.isArray(full) ? full : (full as { tarjetas: Tarjeta[] }).tarjetas
+          if (list?.length) setTarjetas(list)
+        }).catch(() => {})
+      }) ?? setTimeout(() => {
+        api.getTarjetas().then(full => {
+          const list = Array.isArray(full) ? full : (full as { tarjetas: Tarjeta[] }).tarjetas
+          if (list?.length) setTarjetas(list)
+        }).catch(() => {})
+      }, 1500)
+      return () => { typeof id === 'number' && (cancelIdleCallback?.(id) ?? clearTimeout(id)) }
+    }
   }, [data])
 
   useEffect(() => {
@@ -55,13 +72,17 @@ function App() {
     localStorage.setItem('theme', theme)
   }, [theme])
 
+  // Socket diferido: conectar después de que los datos iniciales carguen
+  const socketRef = useRef<Socket | null>(null)
   useEffect(() => {
+    if (isLoading || !data) return
     const transports = localStorage.getItem('socketio_safe_mode') !== '0' ? ['polling'] : ['websocket', 'polling']
     const socket = io(API_BASE || undefined, {
       path: '/socket.io',
       transports: transports as ('polling' | 'websocket')[],
       upgrade: transports.length > 1,
     })
+    socketRef.current = socket
     socket.on('connect', () => {
       setConectado(true)
       socket.emit('join')
@@ -89,8 +110,9 @@ function App() {
     })
     return () => {
       socket.disconnect()
+      socketRef.current = null
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoading, !!data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const notificar = (msg: string, type: 'success' | 'warning' | 'info') => setToast({ msg, type })
 
@@ -143,7 +165,7 @@ function App() {
         />
 
         <main className="pb-4">
-          {isError ? (
+          {isError && !tarjetas.length ? (
             <div className="alert alert-danger mx-3">
               <strong>Error al cargar tarjetas:</strong> {(error as Error)?.message}
               {!API_BASE && (
@@ -154,8 +176,26 @@ function App() {
               )}
               <button className="btn btn-sm btn-outline-danger mt-2" onClick={() => refetch()}>Reintentar</button>
             </div>
-          ) : isLoading ? (
-            <div className="text-center py-5">Cargando tarjetas...</div>
+          ) : isLoading && !tarjetas.length ? (
+            <div className="row kanban-scroll-row">
+              {COLUMNAS.map(col => (
+                <div key={col} className="col-md-3 col-12 mb-3">
+                  <div className="card h-100">
+                    <div className="card-header"><div className="placeholder-glow"><span className="placeholder col-6"></span></div></div>
+                    <div className="card-body">
+                      {[1, 2].map(i => (
+                        <div key={i} className="card mb-2 border-start border-4">
+                          <div className="card-body py-2 px-3 placeholder-glow">
+                            <span className="placeholder col-8 mb-1"></span>
+                            <span className="placeholder col-5"></span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <KanbanBoard
               tarjetas={tarjetasFiltradas}
@@ -166,17 +206,21 @@ function App() {
         </main>
       </div>
 
-      <NuevaTarjetaModal
-        show={showNueva}
-        onClose={() => setShowNueva(false)}
-        onCreada={() => {
-          refetch()
-          setShowNueva(false)
-          notificar('Reparación creada', 'success')
-        }}
-      />
-      <EstadisticasModal show={showEstadisticas} onClose={() => setShowEstadisticas(false)} />
-      <ExportarModal show={showExportar} onClose={() => setShowExportar(false)} />
+      <Suspense fallback={null}>
+        {showNueva && (
+          <NuevaTarjetaModal
+            show={showNueva}
+            onClose={() => setShowNueva(false)}
+            onCreada={() => {
+              refetch()
+              setShowNueva(false)
+              notificar('Reparación creada', 'success')
+            }}
+          />
+        )}
+        {showEstadisticas && <EstadisticasModal show={showEstadisticas} onClose={() => setShowEstadisticas(false)} />}
+        {showExportar && <ExportarModal show={showExportar} onClose={() => setShowExportar(false)} />}
+      </Suspense>
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )

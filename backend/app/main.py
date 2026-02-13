@@ -7,6 +7,8 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from starlette.middleware.gzip import GZipMiddleware
+
 from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.logging_config import setup_logging
@@ -94,6 +96,7 @@ def create_app() -> FastAPI:
     else:
         cors_kw["allow_origins"] = origins if isinstance(origins, list) else ["*"]
     app.add_middleware(CORSMiddleware, **cors_kw)
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     app.include_router(health.router)
     app.include_router(tarjetas.router)
