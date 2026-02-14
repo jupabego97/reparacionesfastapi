@@ -6,9 +6,21 @@ import { Bar, Doughnut } from 'react-chartjs-2';
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
 interface Props { onClose: () => void; }
+interface EstadisticasData {
+  totales_por_estado?: Record<string, number>;
+  tiempos_promedio_dias?: Record<string, number>;
+  distribucion_prioridad?: Record<string, number>;
+  resumen_financiero?: { total_estimado?: number; total_cobrado?: number };
+  tasa_cargador?: { con_cargador?: number; sin_cargador?: number };
+  top_problemas?: Array<{ problema: string; cantidad: number }>;
+  total_reparaciones?: number;
+  completadas_ultimo_mes?: number;
+  pendientes?: number;
+  con_notas_tecnicas?: number;
+}
 
 export default function EstadisticasModal({ onClose }: Props) {
-  const { data: stats, isLoading } = useQuery({ queryKey: ['estadisticas'], queryFn: api.getEstadisticas });
+  const { data: stats, isLoading } = useQuery<EstadisticasData>({ queryKey: ['estadisticas'], queryFn: api.getEstadisticas as () => Promise<EstadisticasData> });
 
   if (isLoading || !stats) {
     return (
@@ -21,11 +33,14 @@ export default function EstadisticasModal({ onClose }: Props) {
     );
   }
 
-  const s = stats as any;
+  const s = stats;
   const estados = s.totales_por_estado || {};
   const tiempos = s.tiempos_promedio_dias || {};
   const prioridad = s.distribucion_prioridad || {};
   const financiero = s.resumen_financiero || {};
+  const totalEstimado = financiero.total_estimado ?? 0;
+  const totalCobrado = financiero.total_cobrado ?? 0;
+  const topProblemas = s.top_problemas ?? [];
 
   const barData = {
     labels: Object.keys(estados).map((k: string) => ({ ingresado: 'Ingresado', diagnosticada: 'Diagnóstico', para_entregar: 'Para entregar', listos: 'Completados' }[k] || k)),
@@ -109,16 +124,16 @@ export default function EstadisticasModal({ onClose }: Props) {
           </div>
 
           {/* Financial summary */}
-          {(financiero.total_estimado > 0 || financiero.total_cobrado > 0) && (
+          {(totalEstimado > 0 || totalCobrado > 0) && (
             <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '1rem' }}>
               <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}><i className="fas fa-dollar-sign"></i> Resumen Financiero</h5>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', textAlign: 'center' }}>
                 <div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f59e0b' }}>${financiero.total_estimado?.toLocaleString()}</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#f59e0b' }}>${totalEstimado.toLocaleString()}</div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total Estimado</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#22c55e' }}>${financiero.total_cobrado?.toLocaleString()}</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#22c55e' }}>${totalCobrado.toLocaleString()}</div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Total Cobrado</div>
                 </div>
               </div>
@@ -126,10 +141,10 @@ export default function EstadisticasModal({ onClose }: Props) {
           )}
 
           {/* Top Problems */}
-          {s.top_problemas?.length > 0 && (
+          {topProblemas.length > 0 && (
             <div style={{ background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
               <h5 style={{ fontSize: '0.8rem', marginBottom: '0.75rem', fontWeight: 600 }}>Top 5 Problemas</h5>
-              {s.top_problemas.map((p: any, i: number) => (
+              {topProblemas.map((p: { problema: string; cantidad: number }, i: number) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
                   <span style={{ fontSize: '0.8rem', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {i + 1}. {p.problema}

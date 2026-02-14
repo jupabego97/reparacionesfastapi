@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo } from '../api/client';
+import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate } from '../api/client';
 import ConfirmModal from './ConfirmModal';
 
 interface Props {
   tarjetaId: number;
   onClose: () => void;
 }
+
+type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'costs';
+type HistorialEntry = {
+  id: number;
+  old_status: string | null;
+  new_status: string;
+  changed_at: string | null;
+  changed_by_name: string | null;
+};
 
 const PRIORIDADES = [
   { value: 'alta', label: 'Alta', color: '#ef4444' },
@@ -17,7 +26,7 @@ const PRIORIDADES = [
 
 export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'info' | 'subtasks' | 'comments' | 'history' | 'costs'>('info');
+  const [tab, setTab] = useState<TabKey>('info');
   const [showDelete, setShowDelete] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -74,7 +83,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   });
 
   const updateMut = useMutation({
-    mutationFn: (data: any) => api.updateTarjeta(tarjetaId, data),
+    mutationFn: (data: TarjetaUpdate) => api.updateTarjeta(tarjetaId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
       qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
@@ -152,7 +161,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                   { key: 'costs', icon: 'fas fa-dollar-sign', label: 'Costos' },
                 ].map(t => (
                   <button key={t.key} className={`modal-tab ${tab === t.key ? 'active' : ''}`}
-                    onClick={() => setTab(t.key as any)}>
+                    onClick={() => setTab(t.key as TabKey)}>
                     <i className={t.icon}></i> <span>{t.label}</span>
                   </button>
                 ))}
@@ -197,7 +206,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                       </div>
                       <div className="form-group">
                         <label><i className="fas fa-user-cog"></i> Asignado a</label>
-                        <select value={form.asignado_a} onChange={e => setForm({ ...form, asignado_a: e.target.value as any })}>
+                        <select value={form.asignado_a} onChange={e => setForm({ ...form, asignado_a: e.target.value })}>
                           <option value="">Sin asignar</option>
                           {users.map((u: UserInfo) => <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>)}
                         </select>
@@ -282,7 +291,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                 {tab === 'history' && (
                   <div className="history-tab">
                     <div className="timeline">
-                      {historial.map((h: any, i: number) => (
+                      {historial.map((h: HistorialEntry, i: number) => (
                         <div key={h.id || i} className="timeline-item">
                           <div className="timeline-dot"></div>
                           <div className="timeline-content">
@@ -308,11 +317,11 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                     <div className="form-row">
                       <div className="form-group">
                         <label><i className="fas fa-calculator"></i> Costo estimado ($)</label>
-                        <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value as any })} placeholder="0" />
+                        <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value })} placeholder="0" />
                       </div>
                       <div className="form-group">
                         <label><i className="fas fa-receipt"></i> Costo final ($)</label>
-                        <input type="number" value={form.costo_final} onChange={e => setForm({ ...form, costo_final: e.target.value as any })} placeholder="0" />
+                        <input type="number" value={form.costo_final} onChange={e => setForm({ ...form, costo_final: e.target.value })} placeholder="0" />
                       </div>
                     </div>
                     <div className="form-group">

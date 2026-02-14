@@ -154,8 +154,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           ) : (
             <button className="btn-action btn-block" onClick={e => {
               e.stopPropagation();
-              const reason = prompt('Motivo del bloqueo:');
-              if (reason !== null) onBlock?.(t.id, reason);
+              onBlock?.(t.id, 'Bloqueo manual');
             }} title="Bloquear">
               <i className="fas fa-lock"></i>
             </button>

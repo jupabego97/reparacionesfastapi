@@ -15,6 +15,10 @@ Migración del sistema de reparaciones a FastAPI (backend) y React (frontend) co
 cd backend
 pip install -r requirements.txt
 # Crear .env con DATABASE_URL, GEMINI_API_KEY opcionales
+# Recomendado:
+# JWT_SECRET=<secreto fuerte>
+# ALLOW_PUBLIC_REGISTER=false
+# RUNTIME_SCHEMA_MIGRATION=false
 python -m alembic upgrade head   # Crear tablas
 python run.py                    # o: uvicorn app.socket_app:socket_app --reload
 ```
@@ -48,4 +52,21 @@ En caso de problemas, revertir al commit anterior del repositorio y redesplegar 
 ```bash
 cd backend
 pytest tests/ -v
+```
+
+## Salud y observabilidad
+
+- `GET /health` estado compuesto
+- `GET /health/live` liveness
+- `GET /health/ready` readiness
+
+Errores API estandarizados:
+
+```json
+{
+  "code": "string",
+  "message": "string",
+  "details": {},
+  "request_id": "string"
+}
 ```

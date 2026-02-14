@@ -90,16 +90,17 @@ def require_role(*roles: str):
 
 def create_default_admin(db: Session) -> None:
     """Crea un admin por defecto si no existen usuarios."""
+    settings = get_settings()
     count = db.query(User).count()
     if count == 0:
         admin = User(
-            username="admin",
-            email="admin@nanotronics.com",
-            hashed_password=hash_password("admin123"),
-            full_name="Administrador",
+            username=settings.default_admin_username,
+            email=settings.default_admin_email,
+            hashed_password=hash_password(settings.default_admin_password),
+            full_name=settings.default_admin_full_name,
             role="admin",
-            avatar_color="#ef4444",
+            avatar_color=settings.default_admin_avatar_color,
         )
         db.add(admin)
         db.commit()
-        logger.info("Usuario admin creado por defecto (user: admin, pass: admin123)")
+        logger.warning("Usuario admin por defecto creado. Cambie la contraseña inmediatamente.")

@@ -384,7 +384,7 @@ async def create_tarjeta(
     result = _enrich_tarjeta(t, db)
 
     try:
-        await sio.emit("tarjeta_creada", result)
+        await sio.emit("tarjeta_creada", {"event_version": 1, "data": result})
     except Exception:
         pass
     return result
@@ -502,7 +502,7 @@ async def update_tarjeta(
 
     result = _enrich_tarjeta(t, db)
     try:
-        await sio.emit("tarjeta_actualizada", result)
+        await sio.emit("tarjeta_actualizada", {"event_version": 1, "data": result})
     except Exception:
         pass
     return result
@@ -548,7 +548,7 @@ async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depend
     db.commit()
     invalidate_stats()
     try:
-        await sio.emit("tarjetas_reordenadas", {"items": changed})
+        await sio.emit("tarjetas_reordenadas", {"event_version": 1, "data": {"items": changed}})
     except Exception:
         pass
     return {"ok": True}
@@ -564,7 +564,7 @@ async def delete_tarjeta(id: int, db: Session = Depends(get_db)):
     db.commit()
     invalidate_stats()
     try:
-        await sio.emit("tarjeta_eliminada", {"id": id})
+        await sio.emit("tarjeta_eliminada", {"event_version": 1, "data": {"id": id}})
     except Exception:
         pass
     return None
@@ -582,7 +582,7 @@ async def restore_tarjeta(id: int, db: Session = Depends(get_db)):
     invalidate_stats()
     result = _enrich_tarjeta(t, db)
     try:
-        await sio.emit("tarjeta_creada", result)
+        await sio.emit("tarjeta_creada", {"event_version": 1, "data": result})
     except Exception:
         pass
     return result
@@ -642,7 +642,7 @@ async def block_tarjeta(id: int, body: dict, db: Session = Depends(get_db)):
     db.refresh(t)
     result = _enrich_tarjeta(t, db)
     try:
-        await sio.emit("tarjeta_actualizada", result)
+        await sio.emit("tarjeta_actualizada", {"event_version": 1, "data": result})
     except Exception:
         pass
     return result
@@ -711,7 +711,7 @@ async def batch_operations(body: dict, db: Session = Depends(get_db)):
     result = _enrich_batch(refreshed, db)
     try:
         for r in result:
-            await sio.emit("tarjeta_actualizada", r)
+            await sio.emit("tarjeta_actualizada", {"event_version": 1, "data": r})
     except Exception:
         pass
     return {"ok": True, "updated": len(updated), "tarjetas": result}

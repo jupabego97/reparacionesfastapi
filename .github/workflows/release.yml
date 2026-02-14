@@ -1,0 +1,17 @@
+name: Release Check
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Summary
+        run: |
+          echo "Release candidate: ${GITHUB_REF}" >> $GITHUB_STEP_SUMMARY
+          echo "Run CI workflow before deploy." >> $GITHUB_STEP_SUMMARY

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, inspect as sa_inspect
@@ -15,10 +15,12 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def health_check(db: Session = Depends(get_db)):
+    settings = get_settings()
     health_status = {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": {},
+        "environment": settings.environment,
     }
 
     try:
@@ -36,9 +38,30 @@ def health_check(db: Session = Depends(get_db)):
     return JSONResponse(content=health_status, status_code=status_code)
 
 
+@router.get("/health/live")
+def liveness():
+    return {"status": "alive", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/health/ready")
+def readiness(db: Session = Depends(get_db)):
+    try:
+        db.scalar(text("SELECT 1"))
+        return {"status": "ready", "timestamp": datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        logger.error(f"Readiness DB failure: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "timestamp": datetime.now(timezone.utc).isoformat()},
+        )
+
+
 @router.get("/debug/schema")
 def debug_schema(db: Session = Depends(get_db)):
-    """Endpoint temporal para diagnosticar estructura de BD."""
+    settings = get_settings()
+    if settings.is_production or not settings.expose_debug_schema:
+        raise HTTPException(status_code=404, detail="Not found")
+
     try:
         inspector = sa_inspect(db.get_bind())
         tables = inspector.get_table_names()
@@ -52,7 +75,6 @@ def debug_schema(db: Session = Depends(get_db)):
             count = db.scalar(text("SELECT COUNT(*) FROM repair_cards"))
             result["repair_cards_count"] = count
 
-        # Test the exact query the tarjetas endpoint uses
         try:
             test = db.execute(text(
                 "SELECT id, status, priority, position, assigned_to, estimated_cost, deleted_at "

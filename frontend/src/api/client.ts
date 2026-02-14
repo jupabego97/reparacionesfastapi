@@ -150,6 +150,29 @@ export interface TarjetasBoardResponse {
   view?: string;
 }
 
+export interface ApiErrorShape {
+  code: string;
+  message: string;
+  details?: unknown;
+  request_id?: string;
+}
+
+export class ApiError extends Error {
+  code: string;
+  details?: unknown;
+  status: number;
+  requestId?: string;
+
+  constructor(payload: ApiErrorShape, status: number) {
+    super(payload.message || 'Request failed');
+    this.name = 'ApiError';
+    this.code = payload.code || 'error';
+    this.details = payload.details;
+    this.status = status;
+    this.requestId = payload.request_id;
+  }
+}
+
 // --- Helper para auth header ---
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('token');
@@ -160,6 +183,35 @@ function jsonHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json', ...authHeaders() };
 }
 
+export async function parseApiError(res: Response): Promise<ApiError> {
+  const raw = await res.text();
+  try {
+    const data = JSON.parse(raw) as Partial<ApiErrorShape>;
+    return new ApiError(
+      {
+        code: data.code || 'error',
+        message: data.message || `HTTP ${res.status}`,
+        details: data.details,
+        request_id: data.request_id,
+      },
+      res.status,
+    );
+  } catch {
+    return new ApiError(
+      {
+        code: 'error',
+        message: raw || `HTTP ${res.status}`,
+      },
+      res.status,
+    );
+  }
+}
+
+async function ensureOk(res: Response): Promise<void> {
+  if (res.ok) return;
+  throw await parseApiError(res);
+}
+
 export const api = {
   // --- Auth ---
   async login(username: string, password: string): Promise<{ access_token: string; user: UserInfo }> {
@@ -167,7 +219,7 @@ export const api = {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async register(data: { username: string; password: string; full_name?: string; email?: string; role?: string; avatar_color?: string }): Promise<{ access_token: string; user: UserInfo }> {
@@ -175,17 +227,17 @@ export const api = {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async getMe(): Promise<UserInfo> {
     const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async getUsers(): Promise<UserInfo[]> {
     const res = await fetch(`${API_BASE}/api/auth/users`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
@@ -204,7 +256,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
       headers: authHeaders(),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async getTarjetasBoard(params?: { page?: number; per_page?: number; includeImageThumb?: boolean; search?: string; estado?: string; prioridad?: string; asignado_a?: number; cargador?: string; tag?: number }): Promise<TarjetasBoardResponse> {
@@ -220,153 +272,153 @@ export const api = {
     if (params?.cargador) search.set('cargador', params.cargador);
     if (params?.tag != null) search.set('tag', String(params.tag));
     const res = await fetch(`${API_BASE}/api/tarjetas?${search}`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async getTarjetaById(id: number): Promise<TarjetaDetail> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async createTarjeta(data: TarjetaCreate): Promise<Tarjeta> {
     const res = await fetch(`${API_BASE}/api/tarjetas`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async updateTarjeta(id: number, data: TarjetaUpdate): Promise<Tarjeta> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async deleteTarjeta(id: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
   async restoreTarjeta(id: number): Promise<Tarjeta> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}/restore`, { method: 'PUT', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async batchUpdatePositions(items: { id: number; columna: string; posicion: number }[]): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tarjetas/batch/positions`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ items }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
   async getHistorial(id: number): Promise<{ id: number; tarjeta_id: number; old_status: string | null; new_status: string; changed_at: string | null; changed_by_name: string | null }[]> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}/historial`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async getTrash(): Promise<Tarjeta[]> {
     const res = await fetch(`${API_BASE}/api/tarjetas/trash/list`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
   // --- Estadísticas ---
   async getEstadisticas(): Promise<object> {
     const res = await fetch(`${API_BASE}/api/estadisticas`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
   // --- Columnas ---
   async getColumnas(): Promise<KanbanColumn[]> {
     const res = await fetch(`${API_BASE}/api/columnas`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async createColumna(data: Partial<KanbanColumn>): Promise<KanbanColumn> {
     const res = await fetch(`${API_BASE}/api/columnas`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async updateColumna(id: number, data: Partial<KanbanColumn>): Promise<KanbanColumn> {
     const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data) });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async deleteColumna(id: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
 
   // --- Tags ---
   async getTags(): Promise<Tag[]> {
     const res = await fetch(`${API_BASE}/api/tags`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async createTag(data: { name: string; color?: string }): Promise<Tag> {
     const res = await fetch(`${API_BASE}/api/tags`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async deleteTag(id: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tags/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
   async addTagToTarjeta(tarjetaId: number, tagId: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'POST', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
   async removeTagFromTarjeta(tarjetaId: number, tagId: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
 
   // --- SubTasks ---
   async getSubTasks(tarjetaId: number): Promise<SubTask[]> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async createSubTask(tarjetaId: number, title: string): Promise<SubTask> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ title }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async updateSubTask(id: number, data: { completed?: boolean; title?: string }): Promise<SubTask> {
     const res = await fetch(`${API_BASE}/api/subtasks/${id}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async deleteSubTask(id: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/subtasks/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
 
   // --- Comments ---
   async getComments(tarjetaId: number): Promise<CommentItem[]> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async createComment(tarjetaId: number, content: string): Promise<CommentItem> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ content }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async deleteComment(id: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/comments/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
 
   // --- Notificaciones ---
   async getNotificaciones(unreadOnly = false): Promise<{ notifications: NotificationItem[]; unread_count: number }> {
     const res = await fetch(`${API_BASE}/api/notificaciones?unread_only=${unreadOnly}`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async markNotificationsRead(ids: number[]): Promise<void> {
@@ -383,12 +435,12 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/procesar-imagen`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ image: imageData }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async transcribirAudio(formData: FormData): Promise<{ transcripcion: string }> {
     const res = await fetch(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async exportar(params: { formato: string; estado?: string; fecha_desde?: string; fecha_hasta?: string }): Promise<Blob> {
@@ -397,7 +449,7 @@ export const api = {
     if (params.fecha_desde) search.set('fecha_desde', params.fecha_desde)
     if (params.fecha_hasta) search.set('fecha_hasta', params.fecha_hasta)
     const res = await fetch(`${API_BASE}/api/exportar?${search}`, { headers: authHeaders() })
-    if (!res.ok) throw new Error(await res.text())
+    await ensureOk(res)
     return res.blob()
   },
 
@@ -407,7 +459,7 @@ export const api = {
       method: 'PATCH', headers: jsonHeaders(),
       body: JSON.stringify({ blocked: true, reason, user_id: userId }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async unblockTarjeta(id: number): Promise<Tarjeta> {
@@ -415,7 +467,7 @@ export const api = {
       method: 'PATCH', headers: jsonHeaders(),
       body: JSON.stringify({ blocked: false }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
@@ -425,14 +477,14 @@ export const api = {
       method: 'POST', headers: jsonHeaders(),
       body: JSON.stringify({ ids, action, value, ...extra }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
   // --- Kanban metrics ---
   async getKanbanMetrics(dias = 30): Promise<KanbanMetrics> {
     const res = await fetch(`${API_BASE}/api/metricas/kanban?dias=${dias}`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
@@ -441,26 +493,26 @@ export const api = {
     let url = `${API_BASE}/api/actividad?limit=${limit}&offset=${offset}`;
     if (tarjetaId) url += `&tarjeta_id=${tarjetaId}`;
     const res = await fetch(url, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
 
   // --- Card templates ---
   async getTemplates(): Promise<CardTemplateItem[]> {
     const res = await fetch(`${API_BASE}/api/plantillas`, { headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async createTemplate(data: Omit<CardTemplateItem, 'id' | 'created_at'>): Promise<CardTemplateItem> {
     const res = await fetch(`${API_BASE}/api/plantillas`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
     return res.json();
   },
   async deleteTemplate(id: number): Promise<void> {
     const res = await fetch(`${API_BASE}/api/plantillas/${id}`, { method: 'DELETE', headers: authHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    await ensureOk(res);
   },
 };
 
@@ -494,3 +546,4 @@ export interface CardTemplateItem {
   estimated_hours: number | null;
   created_at: string;
 }
+

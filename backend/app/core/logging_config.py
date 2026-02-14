@@ -5,6 +5,14 @@ from loguru import logger
 def setup_logging(environment: str = "development") -> None:
     logger.remove()
     level = "INFO" if environment == "production" else "DEBUG"
+    if environment == "production":
+        logger.add(
+            sys.stdout,
+            level=level,
+            serialize=True,
+        )
+        return
+
     logger.add(
         sys.stdout,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",

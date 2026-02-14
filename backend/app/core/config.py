@@ -14,6 +14,18 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production-nanotronics-2024"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480  # 8 horas
+    allow_public_register: bool = False
+    create_default_admin_on_boot: bool = True
+    default_admin_username: str = "admin"
+    default_admin_password: str = "admin123"
+    default_admin_email: str = "admin@nanotronics.com"
+    default_admin_full_name: str = "Administrador"
+    default_admin_avatar_color: str = "#ef4444"
+    runtime_schema_migration: bool = False
+    expose_debug_schema: bool = False
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.0
+    enable_prometheus_metrics: bool = True
 
     # --- S3 storage (Mejora #22) ---
     s3_bucket: str = ""
@@ -30,6 +42,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def is_default_jwt_secret(self) -> bool:
+        return self.jwt_secret.strip() == "change-me-in-production-nanotronics-2024"
 
     def get_cors_origins(self) -> tuple[list[str] | str, str | None]:
         """Retorna (origins, origin_regex). Si ALLOWED_ORIGINS vacío en prod, regex para Railway."""

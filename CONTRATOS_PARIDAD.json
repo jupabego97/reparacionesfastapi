@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "referencia": "flask copy",
   "actualizado": "2025-02-12",
   "estados_validos": ["ingresado", "diagnosticada", "para_entregar", "listos"],
@@ -11,10 +11,13 @@
         "services": { "database": "healthy|unhealthy", "gemini_ai": "healthy|unavailable" }
       }
     },
+    "GET /health/live": { "response_200": { "status": "alive", "timestamp": "ISO8601" } },
+    "GET /health/ready": { "response_200_or_503": { "status": "ready|not_ready", "timestamp": "ISO8601" } },
     "GET /api/tarjetas": {
-      "query": { "page": "int?", "per_page": "int?", "light": "1|undefined" },
+      "query": { "page": "int?", "per_page": "int?", "light": "1|undefined", "view": "board?", "include": "image_thumb?" },
       "response_legacy": "Tarjeta[]",
-      "response_paginado": { "tarjetas": "Tarjeta[]", "pagination": { "page": 1, "per_page": 50, "total": 0, "pages": 0, "has_next": false, "has_prev": false } }
+      "response_paginado": { "tarjetas": "Tarjeta[]", "pagination": { "page": 1, "per_page": 50, "total": 0, "pages": 0, "has_next": false, "has_prev": false } },
+      "response_board": { "view": "board", "tarjetas": "TarjetaBoardItem[]", "pagination": { "page": 1, "per_page": 200, "total": 0, "pages": 0, "has_next": false, "has_prev": false } }
     },
     "POST /api/tarjetas": {
       "body": "TarjetaCreate",
@@ -99,8 +102,13 @@
     }
   },
   "socketio_events": {
-    "server_emits": ["tarjeta_creada", "tarjeta_actualizada", "tarjeta_eliminada", "status"],
+    "server_emits": ["tarjeta_creada", "tarjeta_actualizada", "tarjeta_eliminada", "tarjetas_reordenadas", "status"],
     "client_emits": ["join"],
-    "tarjeta_eliminada_payload": { "id": "int" }
+    "envelope": { "event_version": 1, "data": "object" },
+    "tarjeta_eliminada_payload": { "event_version": 1, "data": { "id": "int" } },
+    "tarjetas_reordenadas_payload": { "event_version": 1, "data": { "items": [{ "id": "int", "columna": "string", "posicion": "int" }] } }
+  },
+  "error_contract": {
+    "shape": { "code": "string", "message": "string", "details": "object|null", "request_id": "string" }
   }
 }

@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense, useCallback, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { api } from './api/client';
-import type { TarjetaBoardItem, KanbanColumn, Tag, UserInfo, TarjetasBoardResponse } from './api/client';
+import type { TarjetaBoardItem, KanbanColumn, Tag, UserInfo, TarjetasBoardResponse, TarjetaUpdate } from './api/client';
 import { useAuth } from './contexts/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import KanbanBoard from './components/KanbanBoard';
@@ -23,8 +23,17 @@ const ExportarModal = lazy(() => import('./components/ExportarModal'));
 
 type ThemeMode = 'light' | 'dark';
 type ViewMode = 'kanban' | 'calendar';
+type ToastType = 'success' | 'warning' | 'info' | 'error';
 
 type ReorderItem = { id: number; columna: string; posicion: number };
+type SocketEnvelope<T> = { event_version?: number; data?: T } | T;
+
+function unwrapSocketData<T>(payload: SocketEnvelope<T>): T {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+}
 
 function loadFilters() {
   try {
@@ -129,7 +138,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const [undoAction, setUndoAction] = useState<{ cardId: number; oldCol: string; msg: string } | null>(null);
-  const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: ToastType } | null>(null);
 
   const { data: boardData, isLoading: loadingCards } = useQuery<TarjetasBoardResponse>({
     queryKey: ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
@@ -183,25 +192,29 @@ export default function App() {
     s.on('disconnect', () => setConnStatus('disconnected'));
     s.on('connect_error', () => setConnStatus('disconnected'));
 
-    s.on('tarjeta_creada', (card: TarjetaBoardItem) => {
+    s.on('tarjeta_creada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
+      const card = unwrapSocketData(payload);
       if (!card?.id) return;
       qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
       qc.invalidateQueries({ queryKey: ['notificaciones'] });
     });
 
-    s.on('tarjeta_actualizada', (card: TarjetaBoardItem) => {
+    s.on('tarjeta_actualizada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
+      const card = unwrapSocketData(payload);
       if (!card?.id) return;
       qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
       qc.invalidateQueries({ queryKey: ['notificaciones'] });
     });
 
-    s.on('tarjeta_eliminada', (payload: { id: number }) => {
-      if (!payload?.id) return;
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => removeCardPatch(old, payload.id));
+    s.on('tarjeta_eliminada', (payload: SocketEnvelope<{ id: number }>) => {
+      const data = unwrapSocketData(payload);
+      if (!data?.id) return;
+      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => removeCardPatch(old, data.id));
     });
 
-    s.on('tarjetas_reordenadas', (payload: { items?: ReorderItem[] }) => {
-      const items = payload?.items;
+    s.on('tarjetas_reordenadas', (payload: SocketEnvelope<{ items?: ReorderItem[] }>) => {
+      const data = unwrapSocketData(payload);
+      const items = data?.items;
       if (!Array.isArray(items) || !items.length) {
         qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
         return;
@@ -220,7 +233,6 @@ export default function App() {
       s.disconnect();
     };
   }, [isAuthenticated, qc, flushReorderBuffer]);
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
@@ -271,7 +283,7 @@ export default function App() {
   const handleUndo = useCallback(async () => {
     if (!undoAction) return;
     try {
-      const updated = await api.updateTarjeta(undoAction.cardId, { columna: undoAction.oldCol } as any);
+      const updated = await api.updateTarjeta(undoAction.cardId, { columna: undoAction.oldCol } as TarjetaUpdate);
       qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated as TarjetaBoardItem));
       setUndoAction(null);
       setToast({ msg: 'Movimiento deshecho', type: 'success' });
@@ -430,7 +442,7 @@ export default function App() {
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
       </Suspense>
 
-      {toast && <Toast message={toast.msg} type={toast.type as any} onClose={() => setToast(null)} />}
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
 }

@@ -1,10 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Tag, UserInfo } from '../api/client';
+import type { Tag, UserInfo, TarjetaCreate } from '../api/client';
 
 interface Props {
   onClose: () => void;
+}
+
+function defaultTomorrowDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
 }
 
 export default function NuevaTarjetaModal({ onClose }: Props) {
@@ -20,7 +26,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
     nombre_propietario: '',
     problema: '',
     whatsapp: '',
-    fecha_limite: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+    fecha_limite: defaultTomorrowDate(),
     tiene_cargador: 'si',
     imagen_url: '',
     prioridad: 'media',
@@ -35,15 +41,16 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers });
 
   const createMut = useMutation({
-    mutationFn: (data: any) => api.createTarjeta(data),
+    mutationFn: (data: TarjetaCreate) => api.createTarjeta(data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); onClose(); },
-    onError: (e: any) => setError(e.message || 'Error al crear'),
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Error al crear'),
   });
 
   useEffect(() => {
+    const currentVideo = videoRef.current;
     return () => {
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      if (currentVideo?.srcObject) {
+        (currentVideo.srcObject as MediaStream).getTracks().forEach(t => t.stop());
       }
     };
   }, []);
