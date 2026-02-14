@@ -37,6 +37,29 @@ def _get_valid_statuses(db: Session) -> list[str]:
     return ["ingresado", "diagnosticada", "para_entregar", "listos"]
 
 
+
+
+def _socket_tarjeta_payload(t: RepairCard) -> dict:
+    """Payload mínimo y consistente para eventos Socket.IO de tarjeta."""
+    return {
+        "id": t.id,
+        "columna": t.status,
+        "posicion": t.position,
+        "nombre_propietario": t.owner_name,
+        "problema": t.problem,
+        "prioridad": t.priority,
+        "asignado_a": t.assigned_to,
+        "asignado_nombre": t.assigned_name,
+        "fecha_limite": t.due_date.strftime("%Y-%m-%d") if t.due_date else None,
+        "tiene_cargador": t.has_charger,
+        "notas_tecnicas": t.technical_notes,
+        "imagen_url": t.image_url,
+        "costo_estimado": t.estimated_cost,
+        "costo_final": t.final_cost,
+        "notas_costo": t.cost_notes,
+        "eliminado": t.deleted_at is not None,
+    }
+
 def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> dict:
     """Enriquece una sola tarjeta (para endpoints de detalle)."""
     d = t.to_dict(include_image=include_image)
@@ -313,7 +336,7 @@ async def create_tarjeta(
     result = _enrich_tarjeta(t, db)
 
     try:
-        await sio.emit("tarjeta_creada", result)
+        await sio.emit("tarjeta_creada", _socket_tarjeta_payload(t))
     except Exception:
         pass
     return result
@@ -431,7 +454,7 @@ async def update_tarjeta(
 
     result = _enrich_tarjeta(t, db)
     try:
-        await sio.emit("tarjeta_actualizada", result)
+        await sio.emit("tarjeta_actualizada", _socket_tarjeta_payload(t))
     except Exception:
         pass
     return result
@@ -475,7 +498,7 @@ async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depend
     db.commit()
     invalidate_stats()
     try:
-        await sio.emit("tarjetas_reordenadas", {})
+        await sio.emit("tarjetas_reordenadas", {"items": [{"id": item.id, "columna": item.columna, "posicion": item.posicion} for item in data.items]})
     except Exception:
         pass
     return {"ok": True}
@@ -491,7 +514,7 @@ async def delete_tarjeta(id: int, db: Session = Depends(get_db)):
     db.commit()
     invalidate_stats()
     try:
-        await sio.emit("tarjeta_eliminada", {"id": id})
+        await sio.emit("tarjeta_eliminada", {"id": id, "eliminado": True})
     except Exception:
         pass
     return None
@@ -509,7 +532,7 @@ async def restore_tarjeta(id: int, db: Session = Depends(get_db)):
     invalidate_stats()
     result = _enrich_tarjeta(t, db)
     try:
-        await sio.emit("tarjeta_creada", result)
+        await sio.emit("tarjeta_creada", _socket_tarjeta_payload(t))
     except Exception:
         pass
     return result
