@@ -177,6 +177,11 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+  async getTarjeta(id: number): Promise<Tarjeta> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
   async createTarjeta(data: TarjetaCreate): Promise<Tarjeta> {
     const res = await fetch(`${API_BASE}/api/tarjetas`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
