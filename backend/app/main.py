@@ -27,8 +27,15 @@ def _run_startup_checks(settings) -> None:
     from sqlalchemy import text
     from app.core.database import SessionLocal
 
-    if settings.is_production and settings.jwt_secret == "change-me-in-production-nanotronics-2024":
-        raise RuntimeError("JWT_SECRET inseguro en producción. Configura una clave fuerte antes de arrancar.")
+    if (
+        settings.is_production
+        and not settings.allow_insecure_jwt_secret
+        and settings.jwt_secret == "change-me-in-production-nanotronics-2024"
+    ):
+        raise RuntimeError(
+            "JWT_SECRET inseguro en producción. Configura una clave fuerte antes de arrancar "
+            "o define ALLOW_INSECURE_JWT_SECRET=true solo para contingencias."
+        )
 
     db = SessionLocal()
     try:
