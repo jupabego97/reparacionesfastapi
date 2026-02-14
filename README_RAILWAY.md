@@ -30,6 +30,8 @@ Este proyecto está preparado para desplegarse en Railway con **3 servicios sepa
    - `DATABASE_URL` → Referencia al servicio PostgreSQL (clic en el add-on y **Connect** → copia la variable)
    - `ENVIRONMENT` = `production`
    - `ALLOWED_ORIGINS` = **URL exacta del frontend** (ej: `https://just-wisdom-production-d465.up.railway.app`). Sin esta variable, CORS bloqueará Socket.IO y la API desde otro dominio.
+   - `JWT_SECRET` = una clave larga y aleatoria (**obligatorio en producción**; el backend no inicia con el valor por defecto inseguro)
+   - `ALLOW_INSECURE_JWT_SECRET` = `true` *(solo contingencia temporal, no recomendado)*
    - `GEMINI_API_KEY` = *(opcional)*
    - `SOCKETIO_SAFE_MODE` = `1`
 4. **Settings** → **Networking** → **Generate Domain** para obtener la URL pública del backend (ej: `https://reparacionesfastapi-backend.up.railway.app`)
@@ -76,6 +78,8 @@ cd backend && python -m alembic upgrade head
 | Backend    | DATABASE_URL     | `postgresql://...` (de add-on PostgreSQL)                  |
 | Backend    | ENVIRONMENT      | `production`                                               |
 | Backend    | ALLOWED_ORIGINS  | URL exacta del frontend (ej: `https://just-wisdom-production-d465.up.railway.app`). **Obligatorio** para CORS cross-origin |
+| Backend    | JWT_SECRET      | Clave fuerte (mínimo recomendando: 32+ caracteres aleatorios) |
+| Backend    | ALLOW_INSECURE_JWT_SECRET | `true` solo para emergencia temporal                 |
 | Backend    | GEMINI_API_KEY   | *(opcional)*                                               |
 | Backend    | SOCKETIO_SAFE_MODE | `1`                                                      |
 | Frontend   | VITE_API_URL     | `https://reparacionesfastapi-backend.up.railway.app`      |
