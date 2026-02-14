@@ -46,7 +46,13 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
 
   if (compact) {
     return (
-      <div className={`tarjeta-card compact ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''}`} onClick={() => onEdit(t)}>
+      <div
+        className={`tarjeta-card compact ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''}`}
+        onClick={() => onEdit(t)}
+        tabIndex={0}
+        role="button"
+        onKeyDown={e => { if (e.key === 'Enter') onEdit(t); }}
+      >
         <div className="tarjeta-compact-row">
           <span className="priority-dot" style={{ background: prio.color }}></span>
           <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
@@ -61,7 +67,19 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
   }
 
   return (
-    <div className={`tarjeta-card ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''} ${selected ? 'card-selected' : ''}`}>
+    <div
+      className={`tarjeta-card ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''} ${selected ? 'card-selected' : ''}`}
+      tabIndex={0}
+      role="button"
+      aria-label={`Tarjeta de ${t.nombre_propietario || 'Cliente'}`}
+      onKeyDown={e => {
+        if (e.key === 'Enter') onEdit(t);
+        if (e.key === ' ' && selectable) {
+          e.preventDefault();
+          onSelect?.(t.id);
+        }
+      }}
+    >
       <div className="priority-strip" style={{ background: isBlocked ? '#ef4444' : prio.color }}></div>
 
       {selectable && (
@@ -144,18 +162,18 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
               <i className="fab fa-whatsapp"></i> WA
             </a>
           )}
-          <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar">
+          <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar" aria-label="Editar tarjeta">
             <i className="fas fa-pen"></i>
           </button>
           {isBlocked ? (
-            <button className="btn-action btn-unblock" onClick={e => { e.stopPropagation(); onUnblock?.(t.id); }} title="Desbloquear">
+            <button className="btn-action btn-unblock" onClick={e => { e.stopPropagation(); onUnblock?.(t.id); }} title="Desbloquear" aria-label="Desbloquear tarjeta">
               <i className="fas fa-lock-open"></i>
             </button>
           ) : (
             <button className="btn-action btn-block" onClick={e => {
               e.stopPropagation();
               onBlock?.(t.id, 'Bloqueo manual');
-            }} title="Bloquear">
+            }} title="Bloquear" aria-label="Bloquear tarjeta">
               <i className="fas fa-lock"></i>
             </button>
           )}

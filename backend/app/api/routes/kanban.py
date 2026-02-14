@@ -1,4 +1,5 @@
 """Rutas para gestión del tablero Kanban: columnas, tags, subtasks, comments, notificaciones."""
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,9 +14,9 @@ from app.schemas.kanban import (
     ColumnCreate, ColumnUpdate, ColumnReorder,
     TagCreate, TagUpdate,
     SubTaskCreate, SubTaskUpdate,
-    CommentCreate, NotificationMarkRead,
+    CommentCreate, NotificationMarkRead, KanbanRules,
 )
-from app.services.auth_service import get_current_user_optional
+from app.services.auth_service import get_current_user_optional, require_role
 
 router = APIRouter(prefix="/api", tags=["kanban"])
 
@@ -36,6 +37,54 @@ def _ensure_default_columns(db: Session) -> None:
         for col_data in DEFAULT_COLUMNS:
             db.add(KanbanColumn(**col_data))
         db.commit()
+
+
+@router.get("/kanban/rules")
+def get_kanban_rules(db: Session = Depends(get_db)):
+    _ensure_default_columns(db)
+    cols = db.query(KanbanColumn).order_by(KanbanColumn.position).all()
+    wip_limits: dict[str, int] = {}
+    sla_by_column: dict[str, int] = {}
+    transition_requirements: dict[str, list[str]] = {}
+    for col in cols:
+        if col.wip_limit is not None:
+            wip_limits[col.key] = col.wip_limit
+        if col.sla_hours is not None:
+            sla_by_column[col.key] = col.sla_hours
+        if col.required_fields:
+            try:
+                transition_requirements[col.key] = json.loads(col.required_fields)
+            except Exception:
+                transition_requirements[col.key] = []
+    return {
+        "wip_limits": wip_limits,
+        "sla_by_column": sla_by_column,
+        "transition_requirements": transition_requirements,
+    }
+
+
+@router.put("/kanban/rules")
+def update_kanban_rules(
+    data: KanbanRules,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_role("admin")),
+):
+    _ensure_default_columns(db)
+    by_key = {c.key: c for c in db.query(KanbanColumn).all()}
+    for key, value in data.wip_limits.items():
+        col = by_key.get(key)
+        if col:
+            col.wip_limit = value
+    for key, value in data.sla_by_column.items():
+        col = by_key.get(key)
+        if col:
+            col.sla_hours = value
+    for key, value in data.transition_requirements.items():
+        col = by_key.get(key)
+        if col:
+            col.required_fields = json.dumps(value, ensure_ascii=True)
+    db.commit()
+    return get_kanban_rules(db)
 
 
 @router.get("/columnas")

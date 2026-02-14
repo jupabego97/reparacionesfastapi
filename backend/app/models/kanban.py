@@ -128,6 +128,7 @@ class Notification(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
 
     def to_dict(self) -> dict:
+        read_at = self.created_at if self.read else None
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -135,7 +136,10 @@ class Notification(Base):
             "title": self.title,
             "message": self.message,
             "type": self.type,
+            "severity": self.type,
+            "action_url": f"/tarjeta/{self.tarjeta_id}" if self.tarjeta_id else None,
             "read": self.read,
+            "read_at": read_at.strftime("%Y-%m-%d %H:%M:%S") if read_at else None,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
 

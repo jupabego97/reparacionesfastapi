@@ -133,8 +133,48 @@ export interface NotificationItem {
   title: string;
   message: string;
   type: string;
+  severity?: string;
+  action_url?: string | null;
   read: boolean;
+  read_at?: string | null;
   created_at: string | null;
+}
+
+export interface UserPreferences {
+  saved_views: SavedView[];
+  default_view: string | null;
+  density: 'comfortable' | 'compact';
+  theme: 'light' | 'dark';
+  mobile_behavior: 'horizontal_swipe' | 'stacked';
+}
+
+export interface SavedView {
+  id: string;
+  name: string;
+  filtros: {
+    search: string;
+    estado: string;
+    prioridad: string;
+    asignado_a: string;
+    cargador: string;
+    tag: string;
+  };
+  groupBy: string;
+  compactView: boolean;
+  viewMode: 'kanban' | 'calendar';
+}
+
+export interface KanbanRules {
+  wip_limits: Record<string, number>;
+  sla_by_column: Record<string, number>;
+  transition_requirements: Record<string, string[]>;
+}
+
+export interface TimelineEvent {
+  event_type: 'status_changed' | 'comment_added' | 'field_updated';
+  event_at: string | null;
+  event_id: string;
+  data: Record<string, unknown>;
 }
 
 export interface TarjetasBoardResponse {
@@ -259,6 +299,18 @@ export const api = {
     await ensureOk(res);
     return res.json();
   },
+  async getMyPreferences(): Promise<UserPreferences> {
+    const res = await fetch(`${API_BASE}/api/users/me/preferences`, { headers: authHeaders() });
+    await ensureOk(res);
+    return res.json();
+  },
+  async updateMyPreferences(data: UserPreferences): Promise<UserPreferences> {
+    const res = await fetch(`${API_BASE}/api/users/me/preferences`, {
+      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
+    });
+    await ensureOk(res);
+    return res.json();
+  },
   async getTarjetasBoard(params?: { page?: number; per_page?: number; includeImageThumb?: boolean; search?: string; estado?: string; prioridad?: string; asignado_a?: number; cargador?: string; tag?: number }): Promise<TarjetasBoardResponse> {
     const search = new URLSearchParams();
     search.set('view', 'board');
@@ -347,6 +399,18 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
+  async getKanbanRules(): Promise<KanbanRules> {
+    const res = await fetch(`${API_BASE}/api/kanban/rules`, { headers: authHeaders() });
+    await ensureOk(res);
+    return res.json();
+  },
+  async updateKanbanRules(data: KanbanRules): Promise<KanbanRules> {
+    const res = await fetch(`${API_BASE}/api/kanban/rules`, {
+      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
+    });
+    await ensureOk(res);
+    return res.json();
+  },
 
   // --- Tags ---
   async getTags(): Promise<Tag[]> {
@@ -422,12 +486,14 @@ export const api = {
     return res.json();
   },
   async markNotificationsRead(ids: number[]): Promise<void> {
-    await fetch(`${API_BASE}/api/notificaciones/mark-read`, {
+    const res = await fetch(`${API_BASE}/api/notificaciones/mark-read`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ ids }),
     });
+    await ensureOk(res);
   },
   async markAllNotificationsRead(): Promise<void> {
-    await fetch(`${API_BASE}/api/notificaciones/mark-all-read`, { method: 'PUT', headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/api/notificaciones/mark-all-read`, { method: 'PUT', headers: authHeaders() });
+    await ensureOk(res);
   },
 
   // --- Multimedia ---
@@ -493,6 +559,11 @@ export const api = {
     let url = `${API_BASE}/api/actividad?limit=${limit}&offset=${offset}`;
     if (tarjetaId) url += `&tarjeta_id=${tarjetaId}`;
     const res = await fetch(url, { headers: authHeaders() });
+    await ensureOk(res);
+    return res.json();
+  },
+  async getTarjetaTimeline(tarjetaId: number, cursor = 0, limit = 30): Promise<{ events: TimelineEvent[]; next_cursor: number | null; total: number }> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/timeline?cursor=${cursor}&limit=${limit}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },

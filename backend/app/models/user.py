@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, Boolean
+from sqlalchemy import Column, Integer, Text, DateTime, Boolean, ForeignKey
 from app.core.database import Base
 
 
@@ -29,3 +29,12 @@ class User(Base):
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
             "last_login": self.last_login.strftime("%Y-%m-%d %H:%M:%S") if self.last_login else None,
         }
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    preferences_json = Column(Text, nullable=False, default="{}")
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))

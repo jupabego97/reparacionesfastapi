@@ -336,6 +336,43 @@ body {
   flex-wrap: wrap;
 }
 
+.header-menu-wrap {
+  position: relative;
+}
+
+.header-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  min-width: 170px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-sm);
+  z-index: 1600;
+  padding: 0.35rem;
+}
+
+.header-more-item {
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  padding: 0.5rem 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  text-align: left;
+  font-size: 0.8rem;
+}
+
+.header-more-item:hover {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
 .header-btn {
   padding: 0.4rem 0.7rem;
   border: 1px solid var(--border);
@@ -833,6 +870,8 @@ body {
   border: none;
   background: none;
   cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
   padding: 0.3rem 0.4rem;
   border-radius: var(--radius-xs);
   transition: var(--transition);
@@ -2556,4 +2595,30 @@ body {
 
 .mobile-fab-new {
   display: none;
+}
+
+.ui-state {
+  margin: 1rem 1.5rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.ui-state i {
+  font-size: 1.2rem;
+  margin-bottom: 0.4rem;
+  color: var(--text-muted);
+}
+
+.ui-state h3 {
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+}
+
+.ui-state p {
+  color: var(--text-secondary);
+  margin-bottom: 0.9rem;
+  font-size: 0.85rem;
 }

@@ -1,8 +1,8 @@
 import { useState, useEffect, lazy, Suspense, useCallback, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { api } from './api/client';
-import type { TarjetaBoardItem, KanbanColumn, Tag, UserInfo, TarjetasBoardResponse, TarjetaUpdate } from './api/client';
+import type { TarjetaBoardItem, KanbanColumn, Tag, UserInfo, TarjetasBoardResponse, TarjetaUpdate, UserPreferences, SavedView } from './api/client';
 import { useAuth } from './contexts/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import KanbanBoard from './components/KanbanBoard';
@@ -13,6 +13,7 @@ import Toast from './components/Toast';
 import ActivityFeed from './components/ActivityFeed';
 import CalendarView from './components/CalendarView';
 import BulkActionsBar from './components/BulkActionsBar';
+import { EmptyState, ErrorState } from './components/UiState';
 import { useDebounce } from './hooks/useDebounce';
 import { API_BASE } from './api/client';
 
@@ -43,6 +44,14 @@ function loadFilters() {
     return { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '' };
   }
 }
+
+const DEFAULT_PREFERENCES: UserPreferences = {
+  saved_views: [],
+  default_view: null,
+  density: 'comfortable',
+  theme: 'dark',
+  mobile_behavior: 'horizontal_swipe',
+};
 
 function applyCardPatch(data: TarjetasBoardResponse | undefined, card: TarjetaBoardItem): TarjetasBoardResponse | undefined {
   if (!data) return data;
@@ -139,8 +148,23 @@ export default function App() {
 
   const [undoAction, setUndoAction] = useState<{ cardId: number; oldCol: string; msg: string } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: ToastType } | null>(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [activeSavedViewId, setActiveSavedViewId] = useState<string>('');
+  const hasAppliedDefaultViewRef = useRef(false);
 
-  const { data: boardData, isLoading: loadingCards } = useQuery<TarjetasBoardResponse>({
+  const { data: preferences = DEFAULT_PREFERENCES } = useQuery<UserPreferences>({
+    queryKey: ['preferences'],
+    queryFn: api.getMyPreferences,
+    enabled: isAuthenticated,
+  });
+
+  const prefsMutation = useMutation({
+    mutationFn: (nextPrefs: UserPreferences) => api.updateMyPreferences(nextPrefs),
+    onSuccess: data => qc.setQueryData(['preferences'], data),
+    onError: () => setToast({ msg: 'No se pudieron guardar preferencias', type: 'warning' }),
+  });
+
+  const { data: boardData, isLoading: loadingCards, isError: boardIsError, error: boardError, refetch: refetchBoard } = useQuery<TarjetasBoardResponse>({
     queryKey: ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
     queryFn: () => fetchBoardCards({
       search: debouncedSearch || undefined,
@@ -173,6 +197,78 @@ export default function App() {
     queryFn: api.getUsers,
     enabled: isAuthenticated,
   });
+
+  useEffect(() => {
+    if (!preferences || hasAppliedDefaultViewRef.current) return;
+    hasAppliedDefaultViewRef.current = true;
+    if (preferences.theme && preferences.theme !== theme) {
+      setTheme(preferences.theme);
+    }
+    if (preferences.default_view) {
+      const found = preferences.saved_views.find(v => v.id === preferences.default_view);
+      if (found) {
+        setFiltros(found.filtros);
+        setGroupBy(found.groupBy);
+        setCompactView(found.compactView);
+        setViewMode(found.viewMode);
+        setActiveSavedViewId(found.id);
+      }
+    }
+  }, [preferences, theme]);
+
+  useEffect(() => {
+    const close = () => setShowMoreMenu(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, []);
+
+  const saveCurrentView = useCallback(() => {
+    const nextIndex = (preferences.saved_views?.length || 0) + 1;
+    const nextView: SavedView = {
+      id: `view_${Date.now()}`,
+      name: `Vista ${nextIndex}`,
+      filtros,
+      groupBy,
+      compactView,
+      viewMode,
+    };
+    const saved_views = [...(preferences.saved_views || []), nextView];
+    const payload: UserPreferences = {
+      ...DEFAULT_PREFERENCES,
+      ...preferences,
+      saved_views,
+      default_view: preferences.default_view || nextView.id,
+      theme,
+    };
+    prefsMutation.mutate(payload);
+    setActiveSavedViewId(nextView.id);
+    setToast({ msg: 'Vista guardada', type: 'success' });
+  }, [preferences, filtros, groupBy, compactView, viewMode, theme, prefsMutation]);
+
+  const applySavedView = useCallback((viewId: string) => {
+    setActiveSavedViewId(viewId);
+    const selected = preferences.saved_views.find(v => v.id === viewId);
+    if (!selected) return;
+    setFiltros(selected.filtros);
+    setGroupBy(selected.groupBy);
+    setCompactView(selected.compactView);
+    setViewMode(selected.viewMode);
+  }, [preferences.saved_views]);
+
+  const removeSavedView = useCallback(() => {
+    if (!activeSavedViewId) return;
+    const saved_views = preferences.saved_views.filter(v => v.id !== activeSavedViewId);
+    const payload: UserPreferences = {
+      ...DEFAULT_PREFERENCES,
+      ...preferences,
+      saved_views,
+      default_view: preferences.default_view === activeSavedViewId ? null : preferences.default_view,
+      theme,
+    };
+    prefsMutation.mutate(payload);
+    setActiveSavedViewId('');
+    setToast({ msg: 'Vista eliminada', type: 'info' });
+  }, [activeSavedViewId, preferences, theme, prefsMutation]);
 
   const flushReorderBuffer = useCallback(() => {
     const items = reorderBufferRef.current;
@@ -292,6 +388,17 @@ export default function App() {
     }
   }, [undoAction, qc]);
 
+  const toggleTheme = useCallback(() => {
+    const nextTheme: ThemeMode = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    const payload: UserPreferences = {
+      ...DEFAULT_PREFERENCES,
+      ...preferences,
+      theme: nextTheme,
+    };
+    prefsMutation.mutate(payload);
+  }, [theme, preferences, prefsMutation]);
+
   useEffect(() => {
     if (!undoAction) return;
     const t = setTimeout(() => setUndoAction(null), 8000);
@@ -316,42 +423,58 @@ export default function App() {
           <ConexionBadge status={connStatus} />
         </div>
         <div className="header-actions">
-          <button className="header-btn" onClick={() => setShowNew(true)} title="Nueva reparacion (N)">
+          <button className="header-btn active" onClick={() => setShowNew(true)} title="Nueva reparacion (N)" aria-label="Crear nueva tarjeta">
             <i className="fas fa-plus"></i> <span className="btn-text">Nueva</span>
           </button>
-          <button className="header-btn" onClick={() => setShowStats(true)} title="Estadisticas (E)">
-            <i className="fas fa-chart-bar"></i>
-          </button>
-          <button className="header-btn" onClick={() => setShowExport(true)} title="Exportar (X)">
-            <i className="fas fa-file-export"></i>
-          </button>
-          <button className="header-btn" onClick={() => setShowActivity(true)} title="Actividad">
-            <i className="fas fa-stream"></i>
-          </button>
 
-          <select className="header-select" value={groupBy} onChange={e => setGroupBy(e.target.value)} title="Agrupar por">
+          <select className="header-select" value={groupBy} onChange={e => setGroupBy(e.target.value)} title="Agrupar por" aria-label="Agrupar tarjetas">
             <option value="none">Sin agrupar</option>
             <option value="priority">Por prioridad</option>
             <option value="assignee">Por tecnico</option>
           </select>
 
           <button className={`header-btn ${compactView ? 'active' : ''}`} onClick={() => setCompactView(!compactView)}
-            title="Vista compacta">
+            title="Vista compacta" aria-label="Alternar vista compacta">
             <i className={compactView ? 'fas fa-th-list' : 'fas fa-th-large'}></i>
           </button>
 
           <NotificationCenter />
 
-          <button className="header-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Cambiar tema">
+          <button className="header-btn" onClick={toggleTheme} title="Cambiar tema" aria-label="Cambiar tema">
             <i className={theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'}></i>
           </button>
+          <div className="header-menu-wrap" onClick={e => e.stopPropagation()}>
+            <button
+              className="header-btn"
+              onClick={() => setShowMoreMenu(!showMoreMenu)}
+              aria-haspopup="menu"
+              aria-expanded={showMoreMenu}
+              aria-controls="header-more-menu"
+              title="Mas acciones"
+            >
+              <i className="fas fa-ellipsis-h"></i> <span className="btn-text">Mas</span>
+            </button>
+            {showMoreMenu && (
+              <div id="header-more-menu" className="header-more-menu" role="menu">
+                <button className="header-more-item" role="menuitem" onClick={() => { setShowStats(true); setShowMoreMenu(false); }}>
+                  <i className="fas fa-chart-bar"></i> Estadisticas
+                </button>
+                <button className="header-more-item" role="menuitem" onClick={() => { setShowExport(true); setShowMoreMenu(false); }}>
+                  <i className="fas fa-file-export"></i> Exportar
+                </button>
+                <button className="header-more-item" role="menuitem" onClick={() => { setShowActivity(true); setShowMoreMenu(false); }}>
+                  <i className="fas fa-stream"></i> Actividad
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="user-menu">
             <div className="user-avatar" style={{ background: user?.avatar_color || '#00ACC1' }}>
               {user?.full_name?.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
             </div>
             <span className="user-name">{user?.full_name}</span>
-            <button className="btn-logout" onClick={logout} title="Cerrar sesion">
+            <button className="btn-logout" onClick={logout} title="Cerrar sesion" aria-label="Cerrar sesion">
               <i className="fas fa-sign-out-alt"></i>
             </button>
           </div>
@@ -373,6 +496,23 @@ export default function App() {
           <span className="shortcuts-hint" title="N = Nueva | E = Estadisticas | X = Exportar | / = Buscar | Esc = Cerrar">
             <i className="fas fa-keyboard"></i> Atajos
           </span>
+          <select
+            className="header-select"
+            value={activeSavedViewId}
+            onChange={e => applySavedView(e.target.value)}
+            aria-label="Vistas guardadas"
+          >
+            <option value="">Vistas guardadas</option>
+            {preferences.saved_views.map(v => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+          <button className="toolbar-btn" onClick={saveCurrentView} aria-label="Guardar vista actual">
+            <i className="fas fa-save"></i> Guardar vista
+          </button>
+          <button className="toolbar-btn" disabled={!activeSavedViewId} onClick={removeSavedView} aria-label="Eliminar vista guardada">
+            <i className="fas fa-trash"></i> Eliminar vista
+          </button>
         </div>
         <div className="toolbar-right">
           <button className={`toolbar-btn ${selectMode ? 'active' : ''}`}
@@ -396,6 +536,20 @@ export default function App() {
                 </div>
               ))}
             </div>
+          ) : boardIsError ? (
+            <ErrorState
+              title="No se pudo cargar el tablero"
+              message={boardError instanceof Error ? boardError.message : 'Error inesperado'}
+              actionLabel="Reintentar"
+              onAction={() => refetchBoard()}
+            />
+          ) : tarjetas.length === 0 ? (
+            <EmptyState
+              title="No hay tarjetas para mostrar"
+              message={Object.values(filtros).some(Boolean) ? 'Pruebe limpiar o ajustar filtros.' : 'Cree su primera tarjeta para comenzar.'}
+              actionLabel={Object.values(filtros).some(Boolean) ? 'Limpiar filtros' : 'Nueva tarjeta'}
+              onAction={() => Object.values(filtros).some(Boolean) ? setFiltros({ search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '' }) : setShowNew(true)}
+            />
           ) : (
             <KanbanBoard columnas={columnas} tarjetas={tarjetas}
               onEdit={t => setEditCardId(t.id)} groupBy={groupBy} compactView={compactView}

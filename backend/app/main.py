@@ -17,10 +17,10 @@ from app.core.errors import default_code_for_status
 from app.core.database import engine
 from app.models.repair_card import Base
 # Importar TODOS los modelos para que se registren con Base.metadata
-from app.models import User, KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags
+from app.models import User, UserPreference, KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags
 from app.models.kanban import CardTemplate  # noqa: F401 — register with metadata
 from app.api.routes import health, tarjetas, estadisticas, exportar, multimedia
-from app.api.routes import auth, kanban as kanban_routes
+from app.api.routes import auth, kanban as kanban_routes, users as users_routes
 from app.api.routes.multimedia import executor
 
 
@@ -324,6 +324,7 @@ def create_app() -> FastAPI:
     app.include_router(exportar.router)
     app.include_router(multimedia.router)
     app.include_router(kanban_routes.router)
+    app.include_router(users_routes.router)
 
     # Nuevas rutas Kanban Pro
     from app.api.routes import metricas, actividad, plantillas

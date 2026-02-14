@@ -41,7 +41,13 @@ export default function NotificationCenter() {
 
     return (
         <div className="notification-center">
-            <button className="notification-bell" onClick={() => setOpen(!open)}>
+            <button
+                className="notification-bell"
+                onClick={() => setOpen(!open)}
+                aria-label="Abrir notificaciones"
+                aria-haspopup="dialog"
+                aria-expanded={open}
+            >
                 <i className="fas fa-bell"></i>
                 {unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
             </button>
@@ -49,7 +55,7 @@ export default function NotificationCenter() {
             {open && (
                 <>
                     <div className="notification-overlay" onClick={() => setOpen(false)} />
-                    <div className="notification-panel">
+                    <div className="notification-panel" role="dialog" aria-label="Centro de notificaciones">
                         <div className="notification-panel-header">
                             <h4><i className="fas fa-bell"></i> Notificaciones</h4>
                             {unreadCount > 0 && (

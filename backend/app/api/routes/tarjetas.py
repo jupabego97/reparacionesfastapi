@@ -620,6 +620,64 @@ def get_historial(id: int, db: Session = Depends(get_db)):
     return [h.to_dict() for h in hist]
 
 
+@router.get("/{id}/timeline")
+def get_timeline(
+    id: int,
+    db: Session = Depends(get_db),
+    cursor: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=100),
+):
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+
+    status_events = db.query(StatusHistory).filter(
+        StatusHistory.tarjeta_id == id
+    ).order_by(StatusHistory.changed_at.desc()).all()
+    comment_events = db.query(Comment).filter(
+        Comment.tarjeta_id == id
+    ).order_by(Comment.created_at.desc()).all()
+
+    events: list[dict] = []
+    for e in status_events:
+        events.append(
+            {
+                "event_type": "status_changed",
+                "event_at": e.changed_at.strftime("%Y-%m-%d %H:%M:%S") if e.changed_at else None,
+                "event_id": f"status_{e.id}",
+                "data": {
+                    "old_status": e.old_status,
+                    "new_status": e.new_status,
+                    "changed_by": e.changed_by,
+                    "changed_by_name": e.changed_by_name,
+                },
+            }
+        )
+    for c in comment_events:
+        events.append(
+            {
+                "event_type": "comment_added",
+                "event_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else None,
+                "event_id": f"comment_{c.id}",
+                "data": {
+                    "comment_id": c.id,
+                    "author_name": c.author_name,
+                    "content": c.content,
+                    "user_id": c.user_id,
+                },
+            }
+        )
+
+    events.sort(key=lambda x: x["event_at"] or "", reverse=True)
+    slice_ = events[cursor:cursor + limit]
+    next_cursor = cursor + len(slice_)
+    return {
+        "events": slice_,
+        "next_cursor": next_cursor if next_cursor < len(events) else None,
+        "total": len(events),
+    }
+
+
 # --- Blocked cards ---
 @router.patch("/{id}/block")
 async def block_tarjeta(id: int, body: dict, db: Session = Depends(get_db)):

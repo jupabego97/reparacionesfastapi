@@ -27,36 +27,45 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
       <div className="filtros-row">
         <div className="search-box">
           <i className="fas fa-search"></i>
-          <input type="text" value={filtros.search} onChange={e => set('search', e.target.value)}
-            placeholder="Buscar por nombre, problema, WhatsApp..." />
-          {filtros.search && <button className="clear-search" onClick={() => set('search', '')}><i className="fas fa-times"></i></button>}
+          <input
+            type="text"
+            value={filtros.search}
+            onChange={e => set('search', e.target.value)}
+            placeholder="Buscar por nombre, problema o WhatsApp..."
+            aria-label="Buscar tarjetas"
+          />
+          {filtros.search && (
+            <button className="clear-search" onClick={() => set('search', '')} aria-label="Limpiar busqueda">
+              <i className="fas fa-times"></i>
+            </button>
+          )}
         </div>
 
-        <select className="filter-select" value={filtros.estado} onChange={e => set('estado', e.target.value)}>
+        <select className="filter-select" value={filtros.estado} onChange={e => set('estado', e.target.value)} aria-label="Filtrar por estado">
           <option value="">Todos los estados</option>
           {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
         </select>
 
-        <select className="filter-select" value={filtros.prioridad} onChange={e => set('prioridad', e.target.value)}>
+        <select className="filter-select" value={filtros.prioridad} onChange={e => set('prioridad', e.target.value)} aria-label="Filtrar por prioridad">
           <option value="">Toda prioridad</option>
-          <option value="alta">🔴 Alta</option>
-          <option value="media">🟡 Media</option>
-          <option value="baja">🟢 Baja</option>
+          <option value="alta">Alta</option>
+          <option value="media">Media</option>
+          <option value="baja">Baja</option>
         </select>
 
-        <select className="filter-select" value={filtros.asignado_a} onChange={e => set('asignado_a', e.target.value)}>
-          <option value="">Todos los técnicos</option>
+        <select className="filter-select" value={filtros.asignado_a} onChange={e => set('asignado_a', e.target.value)} aria-label="Filtrar por tecnico">
+          <option value="">Todos los tecnicos</option>
           {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
         </select>
 
         {tags.length > 0 && (
-          <select className="filter-select" value={filtros.tag} onChange={e => set('tag', e.target.value)}>
+          <select className="filter-select" value={filtros.tag} onChange={e => set('tag', e.target.value)} aria-label="Filtrar por etiqueta">
             <option value="">Todas las etiquetas</option>
             {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
 
-        <select className="filter-select" value={filtros.cargador} onChange={e => set('cargador', e.target.value)}>
+        <select className="filter-select" value={filtros.cargador} onChange={e => set('cargador', e.target.value)} aria-label="Filtrar por cargador">
           <option value="">Cargador</option>
           <option value="si">Con cargador</option>
           <option value="no">Sin cargador</option>

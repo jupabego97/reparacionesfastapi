@@ -60,3 +60,9 @@ class CommentCreate(BaseModel):
 # --- Notificaciones ---
 class NotificationMarkRead(BaseModel):
     ids: List[int]
+
+
+class KanbanRules(BaseModel):
+    wip_limits: dict[str, int] = Field(default_factory=dict)
+    sla_by_column: dict[str, int] = Field(default_factory=dict)
+    transition_requirements: dict[str, list[str]] = Field(default_factory=dict)
