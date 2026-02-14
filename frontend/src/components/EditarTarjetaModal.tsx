@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tarjeta, SubTask, CommentItem, Tag, UserInfo } from '../api/client';
 import ConfirmModal from './ConfirmModal';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 
 interface Props {
   tarjeta: Tarjeta;
@@ -17,6 +18,7 @@ const PRIORIDADES = [
 
 export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
   const qc = useQueryClient();
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<'info' | 'subtasks' | 'comments' | 'history' | 'costs'>('info');
   const [form, setForm] = useState({
     nombre_propietario: tarjeta.nombre_propietario || '',
@@ -36,6 +38,7 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
   const [newComment, setNewComment] = useState('');
   const [showDelete, setShowDelete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { dialogRef, titleId, onKeyDown } = useDialogAccessibility({ onClose, initialFocusRef: closeBtnRef });
 
   // Queries
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags });
@@ -102,10 +105,19 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
   return (
     <>
       <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-pro modal-lg" onClick={e => e.stopPropagation()}>
+        <div
+          className="modal-pro modal-lg"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          ref={dialogRef}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+          onClick={e => e.stopPropagation()}
+        >
           <div className="modal-pro-header">
-            <h3><i className="fas fa-pen-fancy"></i> Editar Reparación #{tarjeta.id}</h3>
-            <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+            <h3 id={titleId}><i className="fas fa-pen-fancy"></i> Editar Reparación #{tarjeta.id}</h3>
+            <button ref={closeBtnRef} className="modal-close" onClick={onClose} aria-label="Cerrar modal de edición"><i className="fas fa-times"></i></button>
           </div>
 
           {/* Tabs */}
@@ -200,7 +212,7 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
                 <div className="add-subtask">
                   <input value={newSubtask} onChange={e => setNewSubtask(e.target.value)} placeholder="Nueva tarea..."
                     onKeyDown={e => { if (e.key === 'Enter' && newSubtask.trim()) addSubtaskMut.mutate(newSubtask.trim()); }} />
-                  <button onClick={() => newSubtask.trim() && addSubtaskMut.mutate(newSubtask.trim())} disabled={!newSubtask.trim()}>
+                  <button onClick={() => newSubtask.trim() && addSubtaskMut.mutate(newSubtask.trim())} disabled={!newSubtask.trim()} aria-label="Agregar subtarea">
                     <i className="fas fa-plus"></i>
                   </button>
                 </div>
@@ -217,7 +229,7 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
                     <li key={s.id} className={`subtask-item ${s.completed ? 'done' : ''}`}>
                       <input type="checkbox" checked={s.completed} onChange={() => toggleSubtaskMut.mutate(s)} />
                       <span className={s.completed ? 'line-through' : ''}>{s.title}</span>
-                      <button className="btn-del-sm" onClick={() => delSubtaskMut.mutate(s.id)}><i className="fas fa-trash"></i></button>
+                      <button className="btn-del-sm" onClick={() => delSubtaskMut.mutate(s.id)} aria-label="Eliminar subtarea"><i className="fas fa-trash"></i></button>
                     </li>
                   ))}
                 </ul>
@@ -239,7 +251,7 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
                       <div className="comment-header">
                         <span className="comment-author"><i className="fas fa-user-circle"></i> {c.author_name}</span>
                         <span className="comment-date">{c.created_at?.slice(0, 16).replace('T', ' ')}</span>
-                        <button className="btn-del-sm" onClick={() => delCommentMut.mutate(c.id)}><i className="fas fa-trash"></i></button>
+                        <button className="btn-del-sm" onClick={() => delCommentMut.mutate(c.id)} aria-label="Eliminar comentario"><i className="fas fa-trash"></i></button>
                       </div>
                       <p className="comment-body">{c.content}</p>
                     </div>

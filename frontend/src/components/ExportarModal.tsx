@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { KanbanColumn } from '../api/client';
 import { useQuery } from '@tanstack/react-query';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 
 interface Props { onClose: () => void; }
 
 export default function ExportarModal({ onClose }: Props) {
   const [formato, setFormato] = useState('csv');
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const { dialogRef, titleId, onKeyDown } = useDialogAccessibility({ onClose, initialFocusRef: closeBtnRef });
   const [estado, setEstado] = useState('todos');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
@@ -32,10 +35,19 @@ export default function ExportarModal({ onClose }: Props) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-pro" onClick={e => e.stopPropagation()}>
+      <div
+        className="modal-pro"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-pro-header">
-          <h3><i className="fas fa-file-export"></i> Exportar Datos</h3>
-          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+          <h3 id={titleId}><i className="fas fa-file-export"></i> Exportar Datos</h3>
+          <button ref={closeBtnRef} className="modal-close" onClick={onClose} aria-label="Cerrar modal de exportación"><i className="fas fa-times"></i></button>
         </div>
         <div className="modal-pro-body">
           <div className="edit-form">

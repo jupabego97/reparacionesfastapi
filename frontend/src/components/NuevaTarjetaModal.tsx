@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import type { Tag, UserInfo } from '../api/client';
 
 interface Props {
@@ -13,6 +14,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
 
@@ -30,6 +32,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   });
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const { dialogRef, titleId, onKeyDown } = useDialogAccessibility({ onClose, initialFocusRef: closeBtnRef });
 
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags });
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers });
@@ -129,10 +132,19 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-pro" onClick={e => e.stopPropagation()}>
+      <div
+        className="modal-pro"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-pro-header">
-          <h3><i className="fas fa-plus-circle"></i> Nueva Reparación</h3>
-          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+          <h3 id={titleId}><i className="fas fa-plus-circle"></i> Nueva Reparación</h3>
+          <button ref={closeBtnRef} className="modal-close" onClick={onClose} aria-label="Cerrar modal de nueva reparación"><i className="fas fa-times"></i></button>
         </div>
 
         <div className="modal-pro-body">
@@ -147,17 +159,17 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
                 <div className="camera-container">
                   <video ref={videoRef} autoPlay playsInline className="camera-preview" />
                   <canvas ref={canvasRef} style={{ display: 'none' }} />
-                  <button className="btn-capture" onClick={capturePhoto} disabled={loading}>
+                  <button className="btn-capture" onClick={capturePhoto} disabled={loading} aria-label="Capturar foto del equipo">
                     {loading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-camera"></i>}
                   </button>
                 </div>
               ) : (
                 <div className="capture-options">
-                  <button className="capture-btn" onClick={startCamera}>
+                  <button className="capture-btn" onClick={startCamera} aria-label="Usar cámara para capturar una imagen">
                     <i className="fas fa-camera"></i>
                     <span>Usar cámara</span>
                   </button>
-                  <label className="capture-btn">
+                  <label className="capture-btn" aria-label="Subir imagen del equipo">
                     <i className="fas fa-image"></i>
                     <span>Subir imagen</span>
                     <input type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} />
@@ -253,7 +265,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
               {form.imagen_url && (
                 <div className="preview-image">
                   <img src={form.imagen_url} alt="Preview" />
-                  <button className="btn-del-sm" onClick={() => setForm({ ...form, imagen_url: '' })}><i className="fas fa-times"></i></button>
+                  <button className="btn-del-sm" onClick={() => setForm({ ...form, imagen_url: '' })} aria-label="Eliminar imagen adjunta"><i className="fas fa-times"></i></button>
                 </div>
               )}
             </div>

@@ -1,20 +1,33 @@
+import { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
 interface Props { onClose: () => void; }
 
 export default function EstadisticasModal({ onClose }: Props) {
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const { dialogRef, titleId, onKeyDown } = useDialogAccessibility({ onClose, initialFocusRef: closeBtnRef });
   const { data: stats, isLoading } = useQuery({ queryKey: ['estadisticas'], queryFn: api.getEstadisticas });
 
   if (isLoading || !stats) {
     return (
       <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-pro modal-lg" onClick={e => e.stopPropagation()}>
-          <div className="modal-pro-header"><h3><i className="fas fa-chart-bar"></i> Estadísticas</h3><button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button></div>
+        <div
+          className="modal-pro modal-lg"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          ref={dialogRef}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="modal-pro-header"><h3 id={titleId}><i className="fas fa-chart-bar"></i> Estadísticas</h3><button ref={closeBtnRef} className="modal-close" onClick={onClose} aria-label="Cerrar modal de estadísticas"><i className="fas fa-times"></i></button></div>
           <div className="modal-pro-body"><div className="app-loading"><div className="spinner-large"></div></div></div>
         </div>
       </div>
@@ -44,10 +57,19 @@ export default function EstadisticasModal({ onClose }: Props) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-pro modal-lg" onClick={e => e.stopPropagation()}>
+      <div
+        className="modal-pro modal-lg"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-pro-header">
-          <h3><i className="fas fa-chart-bar"></i> Estadísticas del Sistema</h3>
-          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+          <h3 id={titleId}><i className="fas fa-chart-bar"></i> Estadísticas del Sistema</h3>
+          <button ref={closeBtnRef} className="modal-close" onClick={onClose} aria-label="Cerrar modal de estadísticas"><i className="fas fa-times"></i></button>
         </div>
         <div className="modal-pro-body">
           {/* KPIs */}
