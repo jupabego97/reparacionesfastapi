@@ -13,14 +13,14 @@ class RepairCard(Base):
     whatsapp_number = Column(Text, nullable=True, default="", index=True)
     problem = Column(Text, nullable=True, default="Sin descripción")
     status = Column(Text, nullable=False, index=True)
-    start_date = Column(DateTime(timezone=True), nullable=False, index=True)
-    due_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    start_date = Column(DateTime, nullable=False, index=True)
+    due_date = Column(DateTime, nullable=False, index=True)
     image_url = Column(Text, nullable=True)
     has_charger = Column(Text, nullable=True)
-    ingresado_date = Column(DateTime(timezone=True), nullable=False)
-    diagnosticada_date = Column(DateTime(timezone=True), nullable=True)
-    para_entregar_date = Column(DateTime(timezone=True), nullable=True)
-    entregados_date = Column(DateTime(timezone=True), nullable=True)
+    ingresado_date = Column(DateTime, nullable=False)
+    diagnosticada_date = Column(DateTime, nullable=True)
+    para_entregar_date = Column(DateTime, nullable=True)
+    entregados_date = Column(DateTime, nullable=True)
     technical_notes = Column(Text, nullable=True)
 
     # --- Mejora #4: Prioridad ---
@@ -39,7 +39,7 @@ class RepairCard(Base):
     cost_notes = Column(Text, nullable=True)
 
     # --- Mejora #23: Soft delete ---
-    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at = Column(DateTime, nullable=True, index=True)
 
     # --- Mejora #10: Tags (via relación M:N) ---
     # Se accede vía join, no relación directa para evitar imports circulares
@@ -79,7 +79,7 @@ class StatusHistory(Base):
     tarjeta_id = Column(Integer, ForeignKey("repair_cards.id", ondelete="CASCADE"), nullable=False, index=True)
     old_status = Column(Text, nullable=True)
     new_status = Column(Text, nullable=False)
-    changed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    changed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     changed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     changed_by_name = Column(Text, nullable=True)
 

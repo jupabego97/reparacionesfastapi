@@ -44,9 +44,8 @@ def crear_notificacion(
 
 def notificar_cambio_estado(
     db: Session, tarjeta: RepairCard, old_status: str, new_status: str
-) -> int:
+) -> None:
     """Genera notificaciones al cambiar el estado de una tarjeta."""
-    created_count = 0
     old_label = ESTADO_LABELS.get(old_status, old_status)
     new_label = ESTADO_LABELS.get(new_status, new_status)
     nombre = tarjeta.owner_name or "Cliente"
@@ -61,7 +60,6 @@ def notificar_cambio_estado(
             user_id=tarjeta.assigned_to,
             tarjeta_id=tarjeta.id,
         )
-        created_count += 1
 
     # Si está listo para entregar, generar notificación especial
     if new_status == "para_entregar":
@@ -72,7 +70,6 @@ def notificar_cambio_estado(
             type="success",
             tarjeta_id=tarjeta.id,
         )
-        created_count += 1
 
     # Si se completó
     if new_status == "listos":
@@ -83,9 +80,6 @@ def notificar_cambio_estado(
             type="success",
             tarjeta_id=tarjeta.id,
         )
-        created_count += 1
-
-    return created_count
 
 
 def generar_url_whatsapp(telefono: str, mensaje: str) -> str | None:

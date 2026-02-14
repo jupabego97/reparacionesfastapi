@@ -1516,14 +1516,6 @@ body {
   gap: 0.3rem;
 }
 
-
-.notification-sync-status {
-  padding: 0.45rem 1rem;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.7rem;
-  color: var(--text-muted);
-}
-
 .notification-list {
   overflow-y: auto;
   max-height: 340px;

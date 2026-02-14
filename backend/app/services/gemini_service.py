@@ -4,25 +4,13 @@ import json
 import os
 import re
 import tempfile
-import warnings
 from pathlib import Path
 
+import google.generativeai as genai
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
 from tenacity import retry, stop_after_attempt, wait_exponential
-
-try:
-    from google import genai as genai_client
-except ImportError:
-    genai_client = None
-
-if genai_client is None:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FutureWarning)
-        import google.generativeai as legacy_genai
-else:
-    legacy_genai = None
 
 load_dotenv()
 
@@ -66,19 +54,8 @@ class GeminiService:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key == "your_gemini_api_key_here":
             raise ValueError("GEMINI_API_KEY no configurada")
-        self._use_legacy = genai_client is None
-        if self._use_legacy:
-            legacy_genai.configure(api_key=api_key)
-            self.model = legacy_genai.GenerativeModel("gemini-flash-latest")
-            self.client = None
-        else:
-            self.client = genai_client.Client(api_key=api_key)
-            self.model = "gemini-2.0-flash"
-
-    def _generate_content(self, contents):
-        if self._use_legacy:
-            return self.model.generate_content(contents)
-        return self.client.models.generate_content(model=self.model, contents=contents)
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel("gemini-flash-latest")
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
     def extract_client_info_from_image(self, image_data, image_format="jpeg"):
@@ -91,12 +68,11 @@ class GeminiService:
             else:
                 image = image_data
 
-            response = self._generate_content([PROMPT_EXTRACT_INFO, image])
-            response_text = getattr(response, "text", "")
-            if not response_text:
+            response = self.model.generate_content([PROMPT_EXTRACT_INFO, image])
+            if not response.text:
                 return {"nombre": "Cliente", "telefono": "", "tiene_cargador": False}
 
-            cleaned = response_text.strip()
+            cleaned = response.text.strip()
             if cleaned.startswith("```"):
                 m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
                 if m:
@@ -112,9 +88,9 @@ class GeminiService:
                 return result
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Parseo JSON fallido: {e}")
-                nombre_m = re.search(r'"nombre":\s*"([^"]+)"', response_text, re.I)
-                telefono_m = re.search(r'"telefono":\s*"([^"]*)"', response_text, re.I)
-                cargador_m = re.search(r'"tiene_cargador":\s*(true|false)', response_text, re.I)
+                nombre_m = re.search(r'"nombre":\s*"([^"]+)"', response.text, re.I)
+                telefono_m = re.search(r'"telefono":\s*"([^"]*)"', response.text, re.I)
+                cargador_m = re.search(r'"tiene_cargador":\s*(true|false)', response.text, re.I)
                 return {
                     "nombre": (nombre_m.group(1).strip() if nombre_m else "Cliente") or "Cliente",
                     "telefono": telefono_m.group(1).strip() if telefono_m else "",
@@ -131,29 +107,13 @@ class GeminiService:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(audio_data)
                 path = f.name
-            if self._use_legacy:
-                uploaded = legacy_genai.upload_file(path, mime_type="audio/wav")
-                response = self.model.generate_content([
-                    "Transcribe exactamente lo que dice la persona. Solo el texto.",
-                    uploaded,
-                ])
-                try:
-                    legacy_genai.delete_file(uploaded.name)
-                except Exception:
-                    pass
-                response_text = getattr(response, "text", "")
-            else:
-                uploaded = self.client.files.upload(file=path)
-                response = self._generate_content([
-                    "Transcribe exactamente lo que dice la persona. Solo el texto.",
-                    uploaded,
-                ])
-                try:
-                    self.client.files.delete(name=uploaded.name)
-                except Exception:
-                    pass
-                response_text = getattr(response, "text", "")
-            return response_text.strip() if response_text else "No se pudo transcribir"
+            uploaded = genai.upload_file(path, mime_type="audio/wav")
+            response = self.model.generate_content(["Transcribe exactamente lo que dice la persona. Solo el texto.", uploaded])
+            try:
+                genai.delete_file(uploaded.name)
+            except Exception:
+                pass
+            return response.text.strip() if response.text else "No se pudo transcribir"
         except Exception as e:
             logger.exception(f"Error transcribiendo: {e}")
             return f"Error al transcribir: {e}"

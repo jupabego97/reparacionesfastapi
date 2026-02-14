@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { api } from '../api/client';
 import type { KanbanColumn } from '../api/client';
 import { useQuery } from '@tanstack/react-query';
-import { getUiErrorFeedback } from '../utils/errorMessaging';
 
 interface Props { onClose: () => void; }
 
@@ -12,13 +11,11 @@ export default function ExportarModal({ onClose }: Props) {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
 
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({ queryKey: ['columnas'], queryFn: api.getColumnas });
 
   const handleExport = async () => {
     setLoading(true);
-    setErrorMessage('');
     try {
       const blob = await api.exportar({ formato, estado: estado !== 'todos' ? estado : undefined, fecha_desde: fechaDesde || undefined, fecha_hasta: fechaHasta || undefined });
       const url = URL.createObjectURL(blob);
@@ -27,9 +24,7 @@ export default function ExportarModal({ onClose }: Props) {
       a.download = `reparaciones.${formato === 'csv' ? 'csv' : 'xlsx'}`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: unknown) {
-      const feedback = getUiErrorFeedback(e, 'No se pudo exportar la información.');
-      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    } catch (e) {
       console.error('Error al exportar:', e);
     }
     setLoading(false);
@@ -43,7 +38,6 @@ export default function ExportarModal({ onClose }: Props) {
           <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
         </div>
         <div className="modal-pro-body">
-          {errorMessage && <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {errorMessage}</div>}
           <div className="edit-form">
             <div className="form-group">
               <label><i className="fas fa-file-alt"></i> Formato</label>
