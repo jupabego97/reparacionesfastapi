@@ -269,7 +269,7 @@ export const api = {
   },
 
   // --- Tarjetas ---
-  async getTarjetas(params?: { page?: number; per_page?: number; light?: number; search?: string; estado?: string; prioridad?: string; asignado_a?: number; tag?: number }): Promise<Tarjeta[] | { tarjetas: Tarjeta[]; pagination: object }> {
+  async getTarjetas(params?: { page?: number; per_page?: number; light?: number; search?: string; estado?: string; prioridad?: string; asignado_a?: number; cargador?: string; tag?: number }): Promise<Tarjeta[] | { tarjetas: Tarjeta[]; pagination: object }> {
     const search = new URLSearchParams();
     if (params?.page != null) search.set('page', String(params.page));
     if (params?.per_page != null) search.set('per_page', String(params.per_page));
@@ -278,6 +278,7 @@ export const api = {
     if (params?.estado) search.set('estado', params.estado);
     if (params?.prioridad) search.set('prioridad', params.prioridad);
     if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
+    if (params?.cargador) search.set('cargador', params.cargador);
     if (params?.tag != null) search.set('tag', String(params.tag));
     const res = await apiFetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
       headers: authHeaders(),
