@@ -8,7 +8,6 @@ import LoginScreen from './components/LoginScreen';
 import KanbanBoard from './components/KanbanBoard';
 import BusquedaFiltros from './components/BusquedaFiltros';
 import ConexionBadge from './components/ConexionBadge';
-import NotificationCenter from './components/NotificationCenter';
 import Toast from './components/Toast';
 import { useDebounce } from './hooks/useDebounce';
 import { API_BASE } from './api/client';
@@ -17,6 +16,7 @@ const NuevaTarjetaModal = lazy(() => import('./components/NuevaTarjetaModal'));
 const EditarTarjetaModal = lazy(() => import('./components/EditarTarjetaModal'));
 const EstadisticasModal = lazy(() => import('./components/EstadisticasModal'));
 const ExportarModal = lazy(() => import('./components/ExportarModal'));
+const NotificationCenter = lazy(() => import('./components/NotificationCenter'));
 
 type ThemeMode = 'light' | 'dark';
 
@@ -33,7 +33,7 @@ export default function App() {
 
   // Modals
   const [showNew, setShowNew] = useState(false);
-  const [editCard, setEditCard] = useState<Tarjeta | null>(null);
+  const [editCardId, setEditCardId] = useState<number | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showExport, setShowExport] = useState(false);
 
@@ -47,11 +47,13 @@ export default function App() {
 
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
+  const [secondaryReady, setSecondaryReady] = useState(false);
 
-  // Queries
+  // Queries (prioridad: columnas + tarjetas)
   const { data: tarjetas = [], isLoading: loadingCards } = useQuery<Tarjeta[]>({
     queryKey: ['tarjetas', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
     queryFn: () => api.getTarjetas({
+      light: 1,
       search: debouncedSearch || undefined,
       estado: filtros.estado || undefined,
       prioridad: filtros.prioridad || undefined,
@@ -63,22 +65,46 @@ export default function App() {
     enabled: isAuthenticated,
   });
 
-  const { data: columnas = [] } = useQuery<KanbanColumn[]>({
+  const { data: columnas = [], isLoading: loadingColumnas } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],
     queryFn: api.getColumnas,
     enabled: isAuthenticated,
   });
 
+  const isPrimaryReady = isAuthenticated && !loadingCards && !loadingColumnas;
+
+  useEffect(() => {
+    if (!isPrimaryReady) {
+      setSecondaryReady(false);
+      return;
+    }
+
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (id: number) => void };
+    if (typeof w.requestIdleCallback === 'function') {
+      const idleId = w.requestIdleCallback(() => setSecondaryReady(true));
+      return () => w.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(() => setSecondaryReady(true), 150);
+    return () => window.clearTimeout(timeoutId);
+  }, [isPrimaryReady]);
+
   const { data: allTags = [] } = useQuery<Tag[]>({
     queryKey: ['tags'],
     queryFn: api.getTags,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && secondaryReady,
   });
 
   const { data: users = [] } = useQuery<UserInfo[]>({
     queryKey: ['users'],
     queryFn: api.getUsers,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && secondaryReady,
+  });
+
+  const { data: editCardDetail, isLoading: loadingEditCard } = useQuery<Tarjeta>({
+    queryKey: ['tarjeta', editCardId],
+    queryFn: () => api.getTarjeta(editCardId as number),
+    enabled: isAuthenticated && editCardId != null,
   });
 
   // Socket.IO
@@ -107,7 +133,7 @@ export default function App() {
       else if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setShowStats(true); }
       else if (e.key === 'x' || e.key === 'X') { e.preventDefault(); setShowExport(true); }
       else if (e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('.search-box input')?.focus(); }
-      else if (e.key === 'Escape') { setShowNew(false); setEditCard(null); setShowStats(false); setShowExport(false); }
+      else if (e.key === 'Escape') { setShowNew(false); setEditCardId(null); setShowStats(false); setShowExport(false); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -155,7 +181,11 @@ export default function App() {
             <i className={compactView ? 'fas fa-th-list' : 'fas fa-th-large'}></i>
           </button>
 
-          <NotificationCenter />
+          {secondaryReady && (
+            <Suspense fallback={null}>
+              <NotificationCenter />
+            </Suspense>
+          )}
 
           <button className="header-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Cambiar tema">
             <i className={theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'}></i>
@@ -197,13 +227,20 @@ export default function App() {
         </div>
       ) : (
         <KanbanBoard columnas={columnas} tarjetas={tarjetas}
-          onEdit={t => setEditCard(t)} groupBy={groupBy} compactView={compactView} />
+          onEdit={t => setEditCardId(t.id)} groupBy={groupBy} compactView={compactView} />
       )}
 
       {/* Modals */}
       <Suspense fallback={null}>
         {showNew && <NuevaTarjetaModal onClose={() => setShowNew(false)} />}
-        {editCard && <EditarTarjetaModal tarjeta={editCard} onClose={() => setEditCard(null)} />}
+        {editCardId && editCardDetail && <EditarTarjetaModal tarjeta={editCardDetail} onClose={() => setEditCardId(null)} />}
+        {editCardId && loadingEditCard && (
+          <div className="modal-overlay">
+            <div className="modal-pro" style={{ maxWidth: 420 }}>
+              <div className="app-loading"><div className="spinner-large"></div><p>Cargando detalle...</p></div>
+            </div>
+          </div>
+        )}
         {showStats && <EstadisticasModal onClose={() => setShowStats(false)} />}
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
       </Suspense>

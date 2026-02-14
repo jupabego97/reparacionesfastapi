@@ -66,7 +66,12 @@ def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> d
     return d
 
 
-def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = True) -> list[dict]:
+def _enrich_batch(
+    items: list[RepairCard],
+    db: Session,
+    include_image: bool = True,
+    include_related: bool = True,
+) -> list[dict]:
     """Enriquece múltiples tarjetas con solo 3 queries totales (batch).
 
     Antes: 3 queries × N tarjetas = O(N) queries.
@@ -75,43 +80,45 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
     if not items:
         return []
 
-    from sqlalchemy import select
     card_ids = [t.id for t in items]
-
-    # --- 1. Bulk tags (2 queries: links + tag objects) ---
-    tag_links = db.execute(
-        select(repair_card_tags.c.repair_card_id, repair_card_tags.c.tag_id)
-        .where(repair_card_tags.c.repair_card_id.in_(card_ids))
-    ).all()
-    tag_ids_needed = list({link.tag_id for link in tag_links})
-    tags_by_id: dict[int, dict] = {}
-    if tag_ids_needed:
-        for tg in db.query(Tag).filter(Tag.id.in_(tag_ids_needed)).all():
-            tags_by_id[tg.id] = tg.to_dict()
     card_tags: dict[int, list[dict]] = {cid: [] for cid in card_ids}
-    for link in tag_links:
-        if link.tag_id in tags_by_id:
-            card_tags[link.repair_card_id].append(tags_by_id[link.tag_id])
-
-    # --- 2. Bulk subtask counts (2 queries: total + done) ---
     subtask_total: dict[int, int] = {}
-    for row in db.query(SubTask.tarjeta_id, func.count(SubTask.id)).filter(
-        SubTask.tarjeta_id.in_(card_ids)
-    ).group_by(SubTask.tarjeta_id).all():
-        subtask_total[row[0]] = row[1]
-
     subtask_done: dict[int, int] = {}
-    for row in db.query(SubTask.tarjeta_id, func.count(SubTask.id)).filter(
-        SubTask.tarjeta_id.in_(card_ids), SubTask.completed == True  # noqa: E712
-    ).group_by(SubTask.tarjeta_id).all():
-        subtask_done[row[0]] = row[1]
-
-    # --- 3. Bulk comment counts (1 query) ---
     comment_counts: dict[int, int] = {}
-    for row in db.query(Comment.tarjeta_id, func.count(Comment.id)).filter(
-        Comment.tarjeta_id.in_(card_ids)
-    ).group_by(Comment.tarjeta_id).all():
-        comment_counts[row[0]] = row[1]
+
+    if include_related:
+        from sqlalchemy import select
+
+        # --- 1. Bulk tags (2 queries: links + tag objects) ---
+        tag_links = db.execute(
+            select(repair_card_tags.c.repair_card_id, repair_card_tags.c.tag_id)
+            .where(repair_card_tags.c.repair_card_id.in_(card_ids))
+        ).all()
+        tag_ids_needed = list({link.tag_id for link in tag_links})
+        tags_by_id: dict[int, dict] = {}
+        if tag_ids_needed:
+            for tg in db.query(Tag).filter(Tag.id.in_(tag_ids_needed)).all():
+                tags_by_id[tg.id] = tg.to_dict()
+        for link in tag_links:
+            if link.tag_id in tags_by_id:
+                card_tags[link.repair_card_id].append(tags_by_id[link.tag_id])
+
+        # --- 2. Bulk subtask counts (2 queries: total + done) ---
+        for row in db.query(SubTask.tarjeta_id, func.count(SubTask.id)).filter(
+            SubTask.tarjeta_id.in_(card_ids)
+        ).group_by(SubTask.tarjeta_id).all():
+            subtask_total[row[0]] = row[1]
+
+        for row in db.query(SubTask.tarjeta_id, func.count(SubTask.id)).filter(
+            SubTask.tarjeta_id.in_(card_ids), SubTask.completed == True  # noqa: E712
+        ).group_by(SubTask.tarjeta_id).all():
+            subtask_done[row[0]] = row[1]
+
+        # --- 3. Bulk comment counts (1 query) ---
+        for row in db.query(Comment.tarjeta_id, func.count(Comment.id)).filter(
+            Comment.tarjeta_id.in_(card_ids)
+        ).group_by(Comment.tarjeta_id).all():
+            comment_counts[row[0]] = row[1]
 
     # --- Build enriched dicts ---
     now = datetime.utcnow()
@@ -156,7 +163,8 @@ def get_tarjetas(
     cargador: str | None = Query(None),
     include_deleted: bool = Query(False),
 ):
-    include_image = light != 1
+    is_light_response = light == 1
+    include_image = not is_light_response
     q = db.query(RepairCard)
 
     # Mejora #23: Soft delete — excluir eliminadas por defecto
@@ -200,7 +208,7 @@ def get_tarjetas(
     try:
         if page is None and per_page is None:
             items = q.all()
-            data = _enrich_batch(items, db, include_image=include_image)
+            data = _enrich_batch(items, db, include_image=include_image, include_related=not is_light_response)
             return JSONResponse(content=data, headers=CACHE_HEADERS)
     except Exception as e:
         from loguru import logger
@@ -212,7 +220,7 @@ def get_tarjetas(
     total = q.count()
     items = q.offset((page - 1) * per_page).limit(per_page).all()
     data = {
-        "tarjetas": _enrich_batch(items, db, include_image=include_image),
+        "tarjetas": _enrich_batch(items, db, include_image=include_image, include_related=not is_light_response),
         "pagination": {
             "page": page,
             "per_page": per_page,
@@ -223,6 +231,17 @@ def get_tarjetas(
         },
     }
     return JSONResponse(content=data, headers=CACHE_HEADERS)
+
+
+@router.get("/{id}")
+def get_tarjeta(id: int, db: Session = Depends(get_db), include_deleted: bool = Query(False)):
+    q = db.query(RepairCard).filter(RepairCard.id == id)
+    if not include_deleted:
+        q = q.filter(RepairCard.deleted_at.is_(None))
+    tarjeta = q.first()
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    return _enrich_tarjeta(tarjeta, db, include_image=True)
 
 
 @router.post("", status_code=201)
