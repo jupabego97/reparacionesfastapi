@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -50,6 +50,49 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
       });
     return grouped;
   }, [tarjetas, columnas]);
+
+  const agrupacionesPorColumna = useMemo(() => {
+    const groupedByColumn: Record<string, { priority: Record<string, Tarjeta[]>; assignee: [string, Tarjeta[]][] }> = {};
+
+    columnas.forEach(col => {
+      const cards = tarjetasPorColumna[col.key] || [];
+      const byPriority: Record<string, Tarjeta[]> = { alta: [], media: [], baja: [] };
+      const byAssigneeMap = new Map<string, Tarjeta[]>();
+
+      cards.forEach(t => {
+        if (byPriority[t.prioridad]) {
+          byPriority[t.prioridad].push(t);
+        }
+
+        const assigneeKey = t.asignado_nombre || 'Sin asignar';
+        if (!byAssigneeMap.has(assigneeKey)) byAssigneeMap.set(assigneeKey, []);
+        byAssigneeMap.get(assigneeKey)!.push(t);
+      });
+
+      groupedByColumn[col.key] = {
+        priority: byPriority,
+        assignee: Array.from(byAssigneeMap.entries()),
+      };
+    });
+
+    return groupedByColumn;
+  }, [columnas, tarjetasPorColumna]);
+
+  const handleDelete = useCallback((id: number) => {
+    deleteMutation.mutate(id);
+  }, [deleteMutation]);
+
+  const handleMoveViaDrop = useCallback((id: number, newCol: string) => {
+    const card = tarjetas.find(t => t.id === id);
+    if (!card) return;
+    const destCards = tarjetasPorColumna[newCol] || [];
+    const updates = [{ id, columna: newCol, posicion: destCards.length }];
+    batchMutation.mutate(updates);
+  }, [batchMutation, tarjetas, tarjetasPorColumna]);
+
+  const handleEdit = useCallback((t: Tarjeta) => {
+    onEdit(t);
+  }, [onEdit]);
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(Number(event.active.id));
@@ -122,20 +165,13 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
     if (updates.length) batchMutation.mutate(updates);
   }
 
-  function handleMoveViaDrop(id: number, newCol: string) {
-    const card = tarjetas.find(t => t.id === id);
-    if (!card) return;
-    const destCards = [...(tarjetasPorColumna[newCol] || [])];
-    const updates = [{ id, columna: newCol, posicion: destCards.length }];
-    batchMutation.mutate(updates);
-  }
-
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter}
       onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
       <div className="kanban-board">
         {columnas.map(col => {
           const cards = tarjetasPorColumna[col.key] || [];
+          const grouped = agrupacionesPorColumna[col.key] || { priority: { alta: [], media: [], baja: [] }, assignee: [] };
           const wipExceeded = col.wip_limit != null && cards.length > col.wip_limit;
           const isOverTarget = overColumn === col.key;
 
@@ -166,42 +202,34 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
                   )}
                   {groupBy === 'priority' ? (
                     ['alta', 'media', 'baja'].map(p => {
-                      const grouped = cards.filter(t => t.prioridad === p);
-                      if (grouped.length === 0) return null;
+                      const priorityCards = grouped.priority[p] || [];
+                      if (priorityCards.length === 0) return null;
                       return (
                         <div key={p} className="swimlane">
-                          <div className="swimlane-header">{PRIORITY_LABELS[p]} ({grouped.length})</div>
-                          {grouped.map(t => (
+                          <div className="swimlane-header">{PRIORITY_LABELS[p]} ({priorityCards.length})</div>
+                          {priorityCards.map(t => (
                             <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
-                              onEdit={onEdit} onDelete={(id: number) => deleteMutation.mutate(id)}
+                              onEdit={handleEdit} onDelete={handleDelete}
                               onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
                           ))}
                         </div>
                       );
                     })
                   ) : groupBy === 'assignee' ? (
-                    (() => {
-                      const byAssignee = new Map<string, Tarjeta[]>();
-                      cards.forEach(t => {
-                        const key = t.asignado_nombre || 'Sin asignar';
-                        if (!byAssignee.has(key)) byAssignee.set(key, []);
-                        byAssignee.get(key)!.push(t);
-                      });
-                      return Array.from(byAssignee.entries()).map(([name, group]) => (
-                        <div key={name} className="swimlane">
-                          <div className="swimlane-header"><i className="fas fa-user-hard-hat"></i> {name} ({group.length})</div>
-                          {group.map(t => (
-                            <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
-                              onEdit={onEdit} onDelete={(id: number) => deleteMutation.mutate(id)}
-                              onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
-                          ))}
-                        </div>
-                      ));
-                    })()
+                    grouped.assignee.map(([name, group]) => (
+                      <div key={name} className="swimlane">
+                        <div className="swimlane-header"><i className="fas fa-user-hard-hat"></i> {name} ({group.length})</div>
+                        {group.map(t => (
+                          <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
+                            onEdit={handleEdit} onDelete={handleDelete}
+                            onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
+                        ))}
+                      </div>
+                    ))
                   ) : (
                     cards.map(t => (
                       <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
-                        onEdit={onEdit} onDelete={(id: number) => deleteMutation.mutate(id)}
+                        onEdit={handleEdit} onDelete={handleDelete}
                         onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
                     ))
                   )}
