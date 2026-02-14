@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -16,17 +16,155 @@ interface Props {
   compactView?: boolean;
 }
 
+interface ColumnBodyProps {
+  col: KanbanColumn;
+  cards: Tarjeta[];
+  columnas: KanbanColumn[];
+  groupBy: string;
+  compactView: boolean;
+  activeId: number | null;
+  onEdit: (t: Tarjeta) => void;
+  onDelete: (id: number) => void;
+  onMove: (id: number, col: string) => void;
+}
+
 const PRIORITY_LABELS: Record<string, string> = { alta: '🔴 Alta', media: '🟡 Media', baja: '🟢 Baja' };
+const VIRTUALIZATION_THRESHOLD = 50;
+const CARD_ESTIMATED_HEIGHT = 170;
+
+function KanbanColumnBody({
+  col,
+  cards,
+  columnas,
+  groupBy,
+  compactView,
+  activeId,
+  onEdit,
+  onDelete,
+  onMove,
+}: ColumnBodyProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldVirtualize = groupBy === 'none' && cards.length > VIRTUALIZATION_THRESHOLD;
+  const activeCardInColumn = activeId != null && cards.some((t) => t.id === activeId);
+
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const updateHeight = () => setViewportHeight(el.clientHeight);
+    updateHeight();
+
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const overscan = activeCardInColumn ? 12 : 8;
+  const startIndex = shouldVirtualize ? Math.max(Math.floor(scrollTop / CARD_ESTIMATED_HEIGHT) - overscan, 0) : 0;
+  const visibleCount = shouldVirtualize
+    ? Math.ceil((viewportHeight || CARD_ESTIMATED_HEIGHT) / CARD_ESTIMATED_HEIGHT) + overscan * 2
+    : cards.length;
+  const endIndex = shouldVirtualize ? Math.min(startIndex + visibleCount, cards.length) : cards.length;
+  const virtualCards = shouldVirtualize ? cards.slice(startIndex, endIndex) : cards;
+
+  const normalCardProps = {
+    columnas,
+    onEdit,
+    onDelete,
+    onMove,
+    compact: compactView || col.is_done_column,
+  };
+
+  return (
+    <div
+      className="kanban-column-body"
+      data-droppable={col.key}
+      ref={scrollRef}
+      onScroll={shouldVirtualize ? (e) => setScrollTop(e.currentTarget.scrollTop) : undefined}
+    >
+      {cards.length === 0 && (
+        <div className="kanban-empty">
+          <i className="fas fa-inbox" style={{ color: col.color, opacity: 0.3 }}></i>
+          <span>Arrastra aquí</span>
+        </div>
+      )}
+
+      {shouldVirtualize ? (
+        <div style={{ height: `${cards.length * CARD_ESTIMATED_HEIGHT}px`, position: 'relative', width: '100%' }}>
+          {virtualCards.map((t, idx) => {
+            const index = startIndex + idx;
+            return (
+              <div
+                key={t.id}
+                data-index={index}
+                style={{
+                  position: 'absolute',
+                  top: `${index * CARD_ESTIMATED_HEIGHT}px`,
+                  left: 0,
+                  width: '100%',
+                }}
+              >
+                <SortableTarjetaCard
+                  tarjeta={t}
+                  {...normalCardProps}
+                  keepSpaceWhileDragging
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : groupBy === 'priority' ? (
+        ['alta', 'media', 'baja'].map((p) => {
+          const grouped = cards.filter((t) => t.prioridad === p);
+          if (grouped.length === 0) return null;
+          return (
+            <div key={p} className="swimlane">
+              <div className="swimlane-header">{PRIORITY_LABELS[p]} ({grouped.length})</div>
+              {grouped.map((t) => (
+                <SortableTarjetaCard key={t.id} tarjeta={t} {...normalCardProps} />
+              ))}
+            </div>
+          );
+        })
+      ) : groupBy === 'assignee' ? (
+        (() => {
+          const byAssignee = new Map<string, Tarjeta[]>();
+          cards.forEach((t) => {
+            const key = t.asignado_nombre || 'Sin asignar';
+            if (!byAssignee.has(key)) byAssignee.set(key, []);
+            byAssignee.get(key)!.push(t);
+          });
+          return Array.from(byAssignee.entries()).map(([name, group]) => (
+            <div key={name} className="swimlane">
+              <div className="swimlane-header"><i className="fas fa-user-hard-hat"></i> {name} ({group.length})</div>
+              {group.map((t) => (
+                <SortableTarjetaCard key={t.id} tarjeta={t} {...normalCardProps} />
+              ))}
+            </div>
+          ));
+        })()
+      ) : (
+        cards.map((t) => (
+          <SortableTarjetaCard key={t.id} tarjeta={t} {...normalCardProps} />
+        ))
+      )}
+    </div>
+  );
+}
 
 export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'none', compactView = false }: Props) {
   const qc = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeTarjetaSnapshot, setActiveTarjetaSnapshot] = useState<Tarjeta | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const activeTarjeta = tarjetas.find(t => t.id === activeId) || null;
+  const activeTarjeta = activeTarjetaSnapshot || tarjetas.find(t => t.id === activeId) || null;
 
   const batchMutation = useMutation({
     mutationFn: (items: { id: number; columna: string; posicion: number }[]) => api.batchUpdatePositions(items),
@@ -52,7 +190,9 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
   }, [tarjetas, columnas]);
 
   function handleDragStart(event: DragStartEvent) {
-    setActiveId(Number(event.active.id));
+    const draggedId = Number(event.active.id);
+    setActiveId(draggedId);
+    setActiveTarjetaSnapshot(tarjetas.find((t) => t.id === draggedId) || null);
   }
 
   function handleDragOver(event: DragOverEvent) {
@@ -68,6 +208,7 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveId(null);
+    setActiveTarjetaSnapshot(null);
     setOverColumn(null);
     const { active, over } = event;
     if (!over) return;
@@ -157,55 +298,17 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
               </div>
 
               <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy} id={col.key}>
-                <div className="kanban-column-body" data-droppable={col.key}>
-                  {cards.length === 0 && (
-                    <div className="kanban-empty">
-                      <i className="fas fa-inbox" style={{ color: col.color, opacity: 0.3 }}></i>
-                      <span>Arrastra aquí</span>
-                    </div>
-                  )}
-                  {groupBy === 'priority' ? (
-                    ['alta', 'media', 'baja'].map(p => {
-                      const grouped = cards.filter(t => t.prioridad === p);
-                      if (grouped.length === 0) return null;
-                      return (
-                        <div key={p} className="swimlane">
-                          <div className="swimlane-header">{PRIORITY_LABELS[p]} ({grouped.length})</div>
-                          {grouped.map(t => (
-                            <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
-                              onEdit={onEdit} onDelete={(id: number) => deleteMutation.mutate(id)}
-                              onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
-                          ))}
-                        </div>
-                      );
-                    })
-                  ) : groupBy === 'assignee' ? (
-                    (() => {
-                      const byAssignee = new Map<string, Tarjeta[]>();
-                      cards.forEach(t => {
-                        const key = t.asignado_nombre || 'Sin asignar';
-                        if (!byAssignee.has(key)) byAssignee.set(key, []);
-                        byAssignee.get(key)!.push(t);
-                      });
-                      return Array.from(byAssignee.entries()).map(([name, group]) => (
-                        <div key={name} className="swimlane">
-                          <div className="swimlane-header"><i className="fas fa-user-hard-hat"></i> {name} ({group.length})</div>
-                          {group.map(t => (
-                            <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
-                              onEdit={onEdit} onDelete={(id: number) => deleteMutation.mutate(id)}
-                              onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
-                          ))}
-                        </div>
-                      ));
-                    })()
-                  ) : (
-                    cards.map(t => (
-                      <SortableTarjetaCard key={t.id} tarjeta={t} columnas={columnas}
-                        onEdit={onEdit} onDelete={(id: number) => deleteMutation.mutate(id)}
-                        onMove={handleMoveViaDrop} compact={compactView || col.is_done_column} />
-                    ))
-                  )}
-                </div>
+                <KanbanColumnBody
+                  col={col}
+                  cards={cards}
+                  columnas={columnas}
+                  groupBy={groupBy}
+                  compactView={compactView}
+                  activeId={activeId}
+                  onEdit={onEdit}
+                  onDelete={(id: number) => deleteMutation.mutate(id)}
+                  onMove={handleMoveViaDrop}
+                />
               </SortableContext>
             </div>
           );
