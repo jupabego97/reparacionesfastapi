@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import TarjetaCard from './TarjetaCard';
@@ -12,7 +13,7 @@ interface Props {
     compact?: boolean;
 }
 
-export default function SortableTarjetaCard({ tarjeta, columnas, onEdit, onDelete, onMove, compact }: Props) {
+function SortableTarjetaCard({ tarjeta, columnas, onEdit, onDelete, onMove, compact }: Props) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: tarjeta.id,
     });
@@ -31,3 +32,5 @@ export default function SortableTarjetaCard({ tarjeta, columnas, onEdit, onDelet
         </div>
     );
 }
+
+export default memo(SortableTarjetaCard);

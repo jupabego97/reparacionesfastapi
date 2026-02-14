@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { Tarjeta, KanbanColumn } from '../api/client';
 
 interface Props {
@@ -27,7 +28,7 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
-export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact }: Props) {
+function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact }: Props) {
   const t = tarjeta;
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
@@ -146,3 +147,5 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
     </div>
   );
 }
+
+export default memo(TarjetaCard);
