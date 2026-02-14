@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_endpoint_url: str = ""  # Para Cloudflare R2 u otros S3-compatible
     use_s3_storage: bool = False
+    media_v2_read_write: bool = True
 
     class Config:
         env_file = ".env"

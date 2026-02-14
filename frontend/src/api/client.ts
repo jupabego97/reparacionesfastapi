@@ -15,6 +15,9 @@ export interface TarjetaBoardItem {
   fecha_entregada: string | null;
   notas_tecnicas: string | null;
   imagen_url: string | null;
+  cover_thumb_url?: string | null;
+  media_count?: number;
+  problema_resumen?: string | null;
   // Nuevos campos
   prioridad: string;
   posicion: number;
@@ -43,6 +46,8 @@ export interface TarjetaDetail extends TarjetaBoardItem {
   fecha_entregada: string | null;
   costo_final: number | null;
   notas_costo: string | null;
+  has_media?: boolean;
+  media_preview?: TarjetaMediaItem[];
 }
 
 export type Tarjeta = TarjetaBoardItem;
@@ -190,6 +195,20 @@ export interface TarjetasBoardResponse {
   view?: string;
 }
 
+export interface TarjetaMediaItem {
+  id: number;
+  tarjeta_id: number;
+  storage_key: string | null;
+  url: string;
+  thumb_url: string | null;
+  position: number;
+  is_cover: boolean;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_at: string | null;
+  deleted_at: string | null;
+}
+
 export interface ApiErrorShape {
   code: string;
   message: string;
@@ -331,6 +350,41 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
+  },
+  async getTarjetaMedia(id: number): Promise<TarjetaMediaItem[]> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media`, { headers: authHeaders() });
+    await ensureOk(res);
+    return res.json();
+  },
+  async uploadTarjetaMedia(id: number, files: File[]): Promise<TarjetaMediaItem[]> {
+    const form = new FormData();
+    files.forEach(file => form.append('files', file));
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: form,
+    });
+    await ensureOk(res);
+    return res.json();
+  },
+  async reorderTarjetaMedia(id: number, items: { id: number; position: number }[]): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/reorder`, {
+      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(items),
+    });
+    await ensureOk(res);
+  },
+  async updateTarjetaMedia(id: number, mediaId: number, data: { is_cover?: boolean }): Promise<TarjetaMediaItem> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/${mediaId}`, {
+      method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(data),
+    });
+    await ensureOk(res);
+    return res.json();
+  },
+  async deleteTarjetaMedia(id: number, mediaId: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/${mediaId}`, {
+      method: 'DELETE', headers: authHeaders(),
+    });
+    await ensureOk(res);
   },
   async createTarjeta(data: TarjetaCreate): Promise<Tarjeta> {
     const res = await fetch(`${API_BASE}/api/tarjetas`, {

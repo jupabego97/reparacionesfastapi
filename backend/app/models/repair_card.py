@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey, Float, Index
+from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey, Float, Index, Boolean
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -109,4 +109,38 @@ class StatusHistory(Base):
             "changed_at": self.changed_at.strftime("%Y-%m-%d %H:%M:%S") if self.changed_at else None,
             "changed_by": self.changed_by,
             "changed_by_name": self.changed_by_name,
+        }
+
+
+class RepairCardMedia(Base):
+    __tablename__ = "repair_card_media"
+    __table_args__ = (
+        Index("ix_repair_card_media_tarjeta_position_cover", "tarjeta_id", "position", "is_cover"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tarjeta_id = Column(Integer, ForeignKey("repair_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    storage_key = Column(Text, nullable=True)
+    url = Column(Text, nullable=False)
+    thumb_url = Column(Text, nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+    is_cover = Column(Boolean, nullable=False, default=False)
+    mime_type = Column(Text, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    deleted_at = Column(DateTime, nullable=True, index=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "tarjeta_id": self.tarjeta_id,
+            "storage_key": self.storage_key,
+            "url": self.url,
+            "thumb_url": self.thumb_url,
+            "position": self.position,
+            "is_cover": self.is_cover,
+            "mime_type": self.mime_type,
+            "size_bytes": self.size_bytes,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+            "deleted_at": self.deleted_at.strftime("%Y-%m-%d %H:%M:%S") if self.deleted_at else None,
         }

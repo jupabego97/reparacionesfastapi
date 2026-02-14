@@ -6,16 +6,17 @@ Mejoras integradas: #4 prioridad, #5 posición, #7 asignación, #9 notificacione
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, defer
 from sqlalchemy import func, text, or_, exists, and_, select
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.core.cache import invalidate_stats
-from app.models.repair_card import RepairCard, StatusHistory
+from app.models.repair_card import RepairCard, StatusHistory, RepairCardMedia
 from app.models.kanban import SubTask, Comment, Tag, repair_card_tags, KanbanColumn
 from app.models.user import User
 from app.schemas.tarjeta import TarjetaCreate, TarjetaUpdate, BatchPosicionUpdate
@@ -27,6 +28,9 @@ from app.services.storage_service import get_storage_service
 router = APIRouter(prefix="/api/tarjetas", tags=["tarjetas"])
 
 CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+MAX_MEDIA_PER_CARD = 10
+MAX_MEDIA_SIZE_BYTES = 8 * 1024 * 1024
+ALLOWED_MEDIA_MIME = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
 def _get_valid_statuses(db: Session) -> list[str]:
@@ -35,6 +39,34 @@ def _get_valid_statuses(db: Session) -> list[str]:
     if cols:
         return [c[0] for c in cols]
     return ["ingresado", "diagnosticada", "para_entregar", "listos"]
+
+
+def _media_rows_for_card(db: Session, tarjeta_id: int) -> list[RepairCardMedia]:
+    return db.query(RepairCardMedia).filter(
+        RepairCardMedia.tarjeta_id == tarjeta_id,
+        RepairCardMedia.deleted_at.is_(None),
+    ).order_by(RepairCardMedia.position.asc(), RepairCardMedia.id.asc()).all()
+
+
+def _media_cover_map(db: Session, card_ids: list[int]) -> tuple[dict[int, str | None], dict[int, int]]:
+    if not card_ids:
+        return {}, {}
+    rows = db.query(RepairCardMedia).filter(
+        RepairCardMedia.tarjeta_id.in_(card_ids),
+        RepairCardMedia.deleted_at.is_(None),
+    ).order_by(
+        RepairCardMedia.tarjeta_id.asc(),
+        RepairCardMedia.is_cover.desc(),
+        RepairCardMedia.position.asc(),
+        RepairCardMedia.id.asc(),
+    ).all()
+    cover_map: dict[int, str | None] = {}
+    count_map: dict[int, int] = {}
+    for row in rows:
+        count_map[row.tarjeta_id] = count_map.get(row.tarjeta_id, 0) + 1
+        if row.tarjeta_id not in cover_map:
+            cover_map[row.tarjeta_id] = row.thumb_url or row.url
+    return cover_map, count_map
 
 
 def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> dict:
@@ -49,6 +81,20 @@ def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> d
     d["subtasks_total"] = len(subtasks)
     d["subtasks_done"] = sum(1 for s in subtasks if s.completed)
     d["comments_count"] = db.query(Comment).filter(Comment.tarjeta_id == t.id).count()
+    media_rows = _media_rows_for_card(db, t.id)
+    d["media_count"] = len(media_rows)
+    d["cover_thumb_url"] = (media_rows[0].thumb_url or media_rows[0].url) if media_rows else (t.image_url if include_image else None)
+    d["has_media"] = len(media_rows) > 0
+    d["media_preview"] = [
+        {
+            "id": m.id,
+            "url": m.url,
+            "thumb_url": m.thumb_url or m.url,
+            "position": m.position,
+            "is_cover": m.is_cover,
+        }
+        for m in media_rows[:3]
+    ]
     now = datetime.utcnow()
     try:
         if t.status == "ingresado" and t.ingresado_date:
@@ -77,6 +123,7 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
 
     from sqlalchemy import select
     card_ids = [t.id for t in items]
+    cover_map, media_count_map = _media_cover_map(db, card_ids)
 
     # --- 1. Bulk tags (2 queries: links + tag objects) ---
     tag_links = db.execute(
@@ -122,6 +169,8 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
         d["subtasks_total"] = subtask_total.get(t.id, 0)
         d["subtasks_done"] = subtask_done.get(t.id, 0)
         d["comments_count"] = comment_counts.get(t.id, 0)
+        d["cover_thumb_url"] = cover_map.get(t.id) or (t.image_url if include_image else None)
+        d["media_count"] = media_count_map.get(t.id, 0)
         try:
             if t.status == "ingresado" and t.ingresado_date:
                 d["dias_en_columna"] = (now - t.ingresado_date).days
@@ -142,33 +191,36 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
 def _serialize_board_items(items: list[RepairCard], db: Session, include_image: bool) -> list[dict]:
     """Serializa tarjetas para vista tablero optimizada."""
     data = _enrich_batch(items, db, include_image=include_image)
-    board_fields = {
-        "id",
-        "nombre_propietario",
-        "problema",
-        "whatsapp",
-        "fecha_limite",
-        "columna",
-        "tiene_cargador",
-        "prioridad",
-        "posicion",
-        "asignado_a",
-        "asignado_nombre",
-        "costo_estimado",
-        "notas_tecnicas",
-        "eliminado",
-        "bloqueada",
-        "motivo_bloqueo",
-        "bloqueada_por",
-        "fecha_bloqueo",
-        "tags",
-        "subtasks_total",
-        "subtasks_done",
-        "comments_count",
-        "dias_en_columna",
-        "imagen_url",
-    }
-    return [{k: v for k, v in item.items() if k in board_fields} for item in data]
+    compact: list[dict] = []
+    for item in data:
+        problema = (item.get("problema") or "").strip()
+        compact.append({
+            "id": item.get("id"),
+            "nombre_propietario": item.get("nombre_propietario"),
+            "problema_resumen": (problema[:90] + "...") if len(problema) > 90 else problema,
+            "columna": item.get("columna"),
+            "prioridad": item.get("prioridad"),
+            "posicion": item.get("posicion"),
+            "asignado_nombre": item.get("asignado_nombre"),
+            "asignado_a": item.get("asignado_a"),
+            "whatsapp": item.get("whatsapp"),
+            "fecha_limite": item.get("fecha_limite"),
+            "tiene_cargador": item.get("tiene_cargador"),
+            "notas_tecnicas": item.get("notas_tecnicas"),
+            "costo_estimado": item.get("costo_estimado"),
+            "dias_en_columna": item.get("dias_en_columna", 0),
+            "subtasks_total": item.get("subtasks_total", 0),
+            "subtasks_done": item.get("subtasks_done", 0),
+            "comments_count": item.get("comments_count", 0),
+            "bloqueada": item.get("bloqueada"),
+            "motivo_bloqueo": item.get("motivo_bloqueo"),
+            "tags": item.get("tags", []),
+            "cover_thumb_url": item.get("cover_thumb_url"),
+            "media_count": item.get("media_count", 0),
+            # Compatibilidad temporal
+            "imagen_url": item.get("cover_thumb_url") or item.get("imagen_url"),
+        })
+    return compact
 
 
 @router.get("")
@@ -304,6 +356,7 @@ async def create_tarjeta(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
 ):
+    settings = get_settings()
     nombre = (data.nombre_propietario or "").strip() or "Cliente"
     problema = (data.problema or "").strip() or "Sin descripción"
     whatsapp = (data.whatsapp or "").strip() or ""
@@ -314,11 +367,16 @@ async def create_tarjeta(
         from datetime import time
         due_dt = datetime.combine(fecha_limite, time.min)
 
-    # Mejora #22: Upload image to S3 if enabled
+    # Legacy image field (compat) + optional media_v2 bootstrap
     imagen_url = data.imagen_url
+    uploaded_media_bootstrap: dict | None = None
     if imagen_url and imagen_url.startswith("data:"):
         storage = get_storage_service()
-        imagen_url = storage.upload_image(imagen_url)
+        if settings.media_v2_read_write:
+            uploaded_media_bootstrap = storage.upload_image_required(imagen_url)
+            imagen_url = uploaded_media_bootstrap["url"]
+        else:
+            imagen_url = storage.upload_image(imagen_url)
 
     # Mejora #7: Asignación de técnico
     assigned_name = None
@@ -377,6 +435,18 @@ async def create_tarjeta(
                 db.execute(insert(repair_card_tags).values(repair_card_id=t.id, tag_id=tag_id))
             except Exception:
                 pass
+        db.commit()
+
+    if uploaded_media_bootstrap:
+        db.add(RepairCardMedia(
+            tarjeta_id=t.id,
+            storage_key=uploaded_media_bootstrap.get("storage_key"),
+            url=uploaded_media_bootstrap["url"],
+            thumb_url=uploaded_media_bootstrap["url"],
+            position=0,
+            is_cover=True,
+            mime_type="image/jpeg",
+        ))
         db.commit()
 
     invalidate_stats()
@@ -598,6 +668,16 @@ async def permanent_delete_tarjeta(id: int, db: Session = Depends(get_db)):
     if t.image_url and t.image_url.startswith("http"):
         storage = get_storage_service()
         storage.delete_image(t.image_url)
+    media_rows = db.query(RepairCardMedia).filter(RepairCardMedia.tarjeta_id == id).all()
+    if media_rows:
+        storage = get_storage_service()
+        if storage.use_s3 and storage._client:
+            for m in media_rows:
+                if m.storage_key:
+                    try:
+                        storage._client.delete_object(Bucket=storage._bucket, Key=m.storage_key)
+                    except Exception:
+                        pass
     db.delete(t)
     db.commit()
     invalidate_stats()
@@ -676,6 +756,150 @@ def get_timeline(
         "next_cursor": next_cursor if next_cursor < len(events) else None,
         "total": len(events),
     }
+
+
+@router.get("/{id}/media")
+def get_tarjeta_media(id: int, db: Session = Depends(get_db)):
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    media = _media_rows_for_card(db, id)
+    if media:
+        return [m.to_dict() for m in media]
+    if t.image_url:
+        return [{
+            "id": 0,
+            "tarjeta_id": id,
+            "storage_key": None,
+            "url": t.image_url,
+            "thumb_url": t.image_url,
+            "position": 0,
+            "is_cover": True,
+            "mime_type": None,
+            "size_bytes": None,
+            "created_at": None,
+            "deleted_at": None,
+        }]
+    return []
+
+
+@router.post("/{id}/media", status_code=201)
+async def upload_tarjeta_media(
+    id: int,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    settings = get_settings()
+    if not settings.media_v2_read_write:
+        raise HTTPException(status_code=400, detail="Media v2 deshabilitado")
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    current = _media_rows_for_card(db, id)
+    if len(current) + len(files) > MAX_MEDIA_PER_CARD:
+        raise HTTPException(status_code=400, detail=f"Limite de {MAX_MEDIA_PER_CARD} fotos por tarjeta")
+
+    storage = get_storage_service()
+    if not storage.use_s3:
+        raise HTTPException(status_code=503, detail="Storage remoto no disponible")
+
+    next_pos = max([m.position for m in current], default=-1) + 1
+    created: list[dict] = []
+    for f in files:
+        mime = (f.content_type or "").lower()
+        if mime not in ALLOWED_MEDIA_MIME:
+            raise HTTPException(status_code=400, detail=f"Formato no soportado: {mime}")
+        data = await f.read()
+        if len(data) > MAX_MEDIA_SIZE_BYTES:
+            raise HTTPException(status_code=400, detail=f"Archivo excede {MAX_MEDIA_SIZE_BYTES // (1024 * 1024)}MB")
+        upload = storage.upload_bytes_required(data, mime, ALLOWED_MEDIA_MIME[mime])
+        item = RepairCardMedia(
+            tarjeta_id=id,
+            storage_key=upload.get("storage_key"),
+            url=upload["url"],
+            thumb_url=upload["url"],
+            position=next_pos,
+            is_cover=(len(current) == 0 and next_pos == 0),
+            mime_type=mime,
+            size_bytes=len(data),
+        )
+        db.add(item)
+        db.flush()
+        created.append(item.to_dict())
+        next_pos += 1
+    db.commit()
+    invalidate_stats()
+    return created
+
+
+@router.put("/{id}/media/reorder")
+def reorder_tarjeta_media(id: int, items: list[dict], db: Session = Depends(get_db)):
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    by_id = {m.id: m for m in _media_rows_for_card(db, id)}
+    for entry in items:
+        media_id = int(entry.get("id"))
+        pos = int(entry.get("position"))
+        m = by_id.get(media_id)
+        if m:
+            m.position = pos
+    db.commit()
+    return {"ok": True}
+
+
+@router.patch("/{id}/media/{media_id}")
+def update_tarjeta_media(id: int, media_id: int, body: dict, db: Session = Depends(get_db)):
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    m = db.query(RepairCardMedia).filter(
+        RepairCardMedia.id == media_id,
+        RepairCardMedia.tarjeta_id == id,
+        RepairCardMedia.deleted_at.is_(None),
+    ).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Media no encontrada")
+    if body.get("is_cover") is True:
+        db.query(RepairCardMedia).filter(
+            RepairCardMedia.tarjeta_id == id,
+            RepairCardMedia.deleted_at.is_(None),
+        ).update({"is_cover": False}, synchronize_session=False)
+        m.is_cover = True
+        t.image_url = m.url
+    db.commit()
+    return m.to_dict()
+
+
+@router.delete("/{id}/media/{media_id}", status_code=204)
+def delete_tarjeta_media(id: int, media_id: int, db: Session = Depends(get_db)):
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    m = db.query(RepairCardMedia).filter(
+        RepairCardMedia.id == media_id,
+        RepairCardMedia.tarjeta_id == id,
+        RepairCardMedia.deleted_at.is_(None),
+    ).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Media no encontrada")
+    m.deleted_at = datetime.now(timezone.utc)
+    if m.storage_key:
+        storage = get_storage_service()
+        if storage.use_s3 and storage._client:
+            try:
+                storage._client.delete_object(Bucket=storage._bucket, Key=m.storage_key)
+            except Exception:
+                pass
+
+    active = _media_rows_for_card(db, id)
+    if active and all(not it.is_cover for it in active):
+        active[0].is_cover = True
+        t.image_url = active[0].url
+    elif not active:
+        t.image_url = None
+    db.commit()
+    return None
 
 
 # --- Blocked cards ---

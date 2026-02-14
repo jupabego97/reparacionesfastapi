@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense, useCallback, useRef } from 'react';
+import { useState, useEffect, lazy, Suspense, useCallback, useRef, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { api } from './api/client';
@@ -90,26 +90,10 @@ async function fetchBoardCards(params: {
   const first = await api.getTarjetasBoard({
     ...params,
     page: 1,
-    per_page: 500,
+    per_page: 200,
     includeImageThumb: true,
   });
-
-  if (!first.pagination?.has_next) return first;
-
-  const tarjetas = [...first.tarjetas];
-  const pages = first.pagination.pages || 1;
-
-  for (let page = 2; page <= pages; page += 1) {
-    const nextPage = await api.getTarjetasBoard({
-      ...params,
-      page,
-      per_page: first.pagination.per_page || 500,
-      includeImageThumb: true,
-    });
-    tarjetas.push(...nextPage.tarjetas);
-  }
-
-  return { ...first, tarjetas };
+  return first;
 }
 
 export default function App() {
@@ -164,8 +148,12 @@ export default function App() {
     onError: () => setToast({ msg: 'No se pudieron guardar preferencias', type: 'warning' }),
   });
 
+  const boardQueryKey = useMemo(
+    () => ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag] as const,
+    [debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
+  );
   const { data: boardData, isLoading: loadingCards, isError: boardIsError, error: boardError, refetch: refetchBoard } = useQuery<TarjetasBoardResponse>({
-    queryKey: ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
+    queryKey: boardQueryKey,
     queryFn: () => fetchBoardCards({
       search: debouncedSearch || undefined,
       estado: filtros.estado || undefined,
@@ -179,6 +167,40 @@ export default function App() {
   });
 
   const tarjetas = boardData?.tarjetas || [];
+
+  useEffect(() => {
+    if (!isAuthenticated || !boardData?.pagination?.has_next) return;
+    let cancelled = false;
+    const baseParams = {
+      search: debouncedSearch || undefined,
+      estado: filtros.estado || undefined,
+      prioridad: filtros.prioridad || undefined,
+      asignado_a: filtros.asignado_a ? Number(filtros.asignado_a) : undefined,
+      cargador: filtros.cargador || undefined,
+      tag: filtros.tag ? Number(filtros.tag) : undefined,
+    };
+    const perPage = boardData.pagination.per_page || 200;
+    const pages = boardData.pagination.pages || 1;
+    (async () => {
+      for (let page = 2; page <= pages; page += 1) {
+        if (cancelled) return;
+        try {
+          const nextPage = await api.getTarjetasBoard({ ...baseParams, page, per_page: perPage, includeImageThumb: true });
+          if (cancelled) return;
+          qc.setQueryData<TarjetasBoardResponse>(boardQueryKey, old => {
+            if (!old) return nextPage;
+            const existingIds = new Set(old.tarjetas.map(t => t.id));
+            const appended = nextPage.tarjetas.filter(t => !existingIds.has(t.id));
+            if (!appended.length) return old;
+            return { ...old, tarjetas: [...old.tarjetas, ...appended] };
+          });
+        } catch {
+          return;
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, boardData?.pagination?.has_next, boardData?.pagination?.pages, boardData?.pagination?.per_page, debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag, qc, boardQueryKey]);
 
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],

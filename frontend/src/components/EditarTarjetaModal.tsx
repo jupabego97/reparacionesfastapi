@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate } from '../api/client';
+import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem } from '../api/client';
 import ConfirmModal from './ConfirmModal';
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
   onClose: () => void;
 }
 
-type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'costs';
+type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'costs' | 'photos';
 type HistorialEntry = {
   id: number;
   old_status: string | null;
@@ -51,6 +51,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [newSubtask, setNewSubtask] = useState('');
   const [newComment, setNewComment] = useState('');
+  const [photoError, setPhotoError] = useState('');
 
   useEffect(() => {
     if (!tarjeta) return;
@@ -80,6 +81,9 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   });
   const { data: historial = [] } = useQuery({
     queryKey: ['historial', tarjetaId], queryFn: () => api.getHistorial(tarjetaId),
+  });
+  const { data: media = [], refetch: refetchMedia } = useQuery<TarjetaMediaItem[]>({
+    queryKey: ['media', tarjetaId], queryFn: () => api.getTarjetaMedia(tarjetaId),
   });
 
   const updateMut = useMutation({
@@ -119,6 +123,23 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
     mutationFn: (id: number) => api.deleteComment(id),
     onSuccess: () => refetchComments(),
   });
+  const uploadMediaMut = useMutation({
+    mutationFn: (files: File[]) => api.uploadTarjetaMedia(tarjetaId, files),
+    onSuccess: () => { refetchMedia(); qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
+    onError: (e: unknown) => setPhotoError(e instanceof Error ? e.message : 'Error subiendo fotos'),
+  });
+  const deleteMediaMut = useMutation({
+    mutationFn: (mediaId: number) => api.deleteTarjetaMedia(tarjetaId, mediaId),
+    onSuccess: () => { refetchMedia(); qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
+  });
+  const coverMediaMut = useMutation({
+    mutationFn: (mediaId: number) => api.updateTarjetaMedia(tarjetaId, mediaId, { is_cover: true }),
+    onSuccess: () => { refetchMedia(); qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
+  });
+  const reorderMediaMut = useMutation({
+    mutationFn: (items: { id: number; position: number }[]) => api.reorderTarjetaMedia(tarjetaId, items),
+    onSuccess: () => refetchMedia(),
+  });
 
   const handleSave = async () => {
     setSaving(true);
@@ -137,6 +158,28 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
       tags: selectedTags,
     });
     setSaving(false);
+  };
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    if (media.length + files.length > 10) {
+      setPhotoError('Limite maximo de 10 fotos por tarjeta');
+      return;
+    }
+    setPhotoError('');
+    uploadMediaMut.mutate(files);
+  };
+
+  const moveMedia = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= media.length) return;
+    const copy = [...media];
+    const tmp = copy[index];
+    copy[index] = copy[target];
+    copy[target] = tmp;
+    const items = copy.map((m, pos) => ({ id: m.id, position: pos }));
+    reorderMediaMut.mutate(items);
   };
 
   return (
@@ -159,6 +202,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                   { key: 'comments', icon: 'fas fa-comments', label: `Comentarios (${comments.length})` },
                   { key: 'history', icon: 'fas fa-history', label: 'Historial' },
                   { key: 'costs', icon: 'fas fa-dollar-sign', label: 'Costos' },
+                  { key: 'photos', icon: 'fas fa-images', label: `Fotos (${media.length})` },
                 ].map(t => (
                   <button key={t.key} className={`modal-tab ${tab === t.key ? 'active' : ''}`}
                     onClick={() => setTab(t.key as TabKey)}>
@@ -338,6 +382,38 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {tab === 'photos' && (
+                  <div className="photos-tab">
+                    <div className="form-group">
+                      <label><i className="fas fa-images"></i> Galeria ({media.length}/10)</label>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handlePhotoUpload} />
+                      {photoError && <span className="field-error">{photoError}</span>}
+                    </div>
+                    <div className="photo-grid">
+                      {media.map((m, idx) => (
+                        <div key={m.id} className="photo-card">
+                          <img src={m.thumb_url || m.url} alt={`Foto ${idx + 1}`} />
+                          <div className="photo-actions">
+                            <button className="btn-action" onClick={() => coverMediaMut.mutate(m.id)} title="Usar como portada">
+                              <i className={`fas ${m.is_cover ? 'fa-star' : 'fa-star-half-alt'}`}></i>
+                            </button>
+                            <button className="btn-action" onClick={() => moveMedia(idx, -1)} title="Mover arriba">
+                              <i className="fas fa-arrow-up"></i>
+                            </button>
+                            <button className="btn-action" onClick={() => moveMedia(idx, 1)} title="Mover abajo">
+                              <i className="fas fa-arrow-down"></i>
+                            </button>
+                            <button className="btn-action" onClick={() => deleteMediaMut.mutate(m.id)} title="Eliminar foto">
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {media.length === 0 && <p className="empty-msg">Sin fotos en esta tarjeta</p>}
+                    </div>
                   </div>
                 )}
               </div>

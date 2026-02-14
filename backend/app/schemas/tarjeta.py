@@ -63,6 +63,10 @@ class TarjetaResponse(BaseModel):
     tags: Optional[List[dict]] = None
     subtasks: Optional[List[dict]] = None
     comments_count: Optional[int] = 0
+    cover_thumb_url: Optional[str] = None
+    media_count: Optional[int] = 0
+    has_media: Optional[bool] = False
+    media_preview: Optional[List[dict]] = None
 
 
 class HistorialEntry(BaseModel):

@@ -76,6 +76,53 @@ class StorageService:
             logger.error(f"Error subiendo a S3, usando base64: {e}")
             return image_data
 
+    def upload_image_required(self, image_data: str) -> dict:
+        """Sube imagen y exige storage remoto disponible.
+
+        Retorna: {"url": str, "storage_key": str | None}
+        """
+        if not self.use_s3 or not self._client:
+            raise RuntimeError("Storage remoto no disponible para media_v2")
+        try:
+            if image_data.startswith("data:image"):
+                header, encoded = image_data.split(",", 1)
+                content_type = header.split(":")[1].split(";")[0]
+                ext = content_type.split("/")[1]
+            else:
+                encoded = image_data
+                content_type = "image/jpeg"
+                ext = "jpeg"
+
+            raw = base64.b64decode(encoded)
+            key = f"repairs/{datetime.now(timezone.utc).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
+            self._client.put_object(Bucket=self._bucket, Key=key, Body=raw, ContentType=content_type)
+
+            settings = get_settings()
+            if settings.s3_endpoint_url:
+                url = f"{settings.s3_endpoint_url}/{self._bucket}/{key}"
+            else:
+                url = f"https://{self._bucket}.s3.{settings.s3_region}.amazonaws.com/{key}"
+            return {"url": url, "storage_key": key}
+        except Exception as e:
+            logger.error(f"Error subiendo imagen requerida: {e}")
+            raise RuntimeError("No se pudo subir imagen a storage remoto") from e
+
+    def upload_bytes_required(self, content: bytes, mime_type: str, ext: str) -> dict:
+        if not self.use_s3 or not self._client:
+            raise RuntimeError("Storage remoto no disponible para media_v2")
+        try:
+            key = f"repairs/{datetime.now(timezone.utc).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
+            self._client.put_object(Bucket=self._bucket, Key=key, Body=content, ContentType=mime_type)
+            settings = get_settings()
+            if settings.s3_endpoint_url:
+                url = f"{settings.s3_endpoint_url}/{self._bucket}/{key}"
+            else:
+                url = f"https://{self._bucket}.s3.{settings.s3_region}.amazonaws.com/{key}"
+            return {"url": url, "storage_key": key}
+        except Exception as e:
+            logger.error(f"Error subiendo bytes requeridos: {e}")
+            raise RuntimeError("No se pudo subir archivo a storage remoto") from e
+
     def delete_image(self, url: str) -> bool:
         """Elimina una imagen de S3 por su URL."""
         if not self.use_s3 or not self._client or not url.startswith("http"):

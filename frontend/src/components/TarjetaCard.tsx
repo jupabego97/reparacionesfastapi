@@ -113,8 +113,8 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         </div>
       </div>
 
-      {t.problema && t.problema !== 'Sin descripcion' && (
-        <p className="tarjeta-problem">{t.problema.length > 80 ? t.problema.slice(0, 80) + '...' : t.problema}</p>
+      {(t.problema_resumen || t.problema) && (t.problema || t.problema_resumen) !== 'Sin descripcion' && (
+        <p className="tarjeta-problem">{t.problema_resumen || (t.problema!.length > 80 ? t.problema!.slice(0, 80) + '...' : t.problema)}</p>
       )}
 
       {t.tags && t.tags.length > 0 && (
@@ -136,8 +136,12 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         </div>
       )}
 
-      {t.imagen_url && (
-        <img src={t.imagen_url} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
+      {(t.cover_thumb_url || t.imagen_url) ? (
+        <img src={t.cover_thumb_url || t.imagen_url || ''} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
+      ) : (
+        <div className="tarjeta-thumbnail tarjeta-thumbnail-placeholder" onClick={() => onEdit(t)}>
+          <i className="fas fa-image"></i>
+        </div>
       )}
 
       <div className="tarjeta-footer">

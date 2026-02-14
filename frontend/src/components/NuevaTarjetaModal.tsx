@@ -21,6 +21,9 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'partial_failed' | 'done'>('idle');
 
   const [form, setForm] = useState({
     nombre_propietario: '',
@@ -42,7 +45,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
 
   const createMut = useMutation({
     mutationFn: (data: TarjetaCreate) => api.createTarjeta(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
     onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Error al crear'),
   });
 
@@ -74,11 +77,23 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => { if (ev.target?.result) processImage(ev.target.result as string); };
-    reader.readAsDataURL(file);
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const all = [...photoFiles, ...files].slice(0, 10);
+    if (all.length < photoFiles.length + files.length) {
+      setError('Limite maximo de 10 fotos por tarjeta');
+    }
+    setPhotoFiles(all);
+    const readers = all.map(file => new Promise<string>((resolve) => {
+      const r = new FileReader();
+      r.onload = ev => resolve((ev.target?.result as string) || '');
+      r.readAsDataURL(file);
+    }));
+    Promise.all(readers).then(previews => {
+      setPhotoPreviews(previews.filter(Boolean));
+      if (previews[0]) processImage(previews[0]);
+      else setStep('form');
+    });
   };
 
   const processImage = async (imageData: string) => {
@@ -117,9 +132,10 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
-    createMut.mutate({
+    try {
+      const created = await createMut.mutateAsync({
       nombre_propietario: form.nombre_propietario.trim(),
       problema: form.problema.trim() || 'Sin descripción',
       whatsapp: form.whatsapp.trim(),
@@ -132,6 +148,21 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
       notas_tecnicas: form.notas_tecnicas || undefined,
       tags: selectedTags.length ? selectedTags : undefined,
     });
+      if (photoFiles.length > 0) {
+        setUploadState('uploading');
+        try {
+          await api.uploadTarjetaMedia(created.id, photoFiles);
+          setUploadState('done');
+        } catch {
+          setUploadState('partial_failed');
+          setError('Tarjeta creada, pero algunas fotos no se pudieron subir');
+        }
+      }
+      qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+      onClose();
+    } catch {
+      setUploadState('idle');
+    }
   };
 
   return (
@@ -166,8 +197,8 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
                   </button>
                   <label className="capture-btn">
                     <i className="fas fa-image"></i>
-                    <span>Subir imagen</span>
-                    <input type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} />
+                    <span>Subir imagenes</span>
+                    <input type="file" accept="image/*" multiple onChange={handleFileUpload} style={{ display: 'none' }} />
                   </label>
                   <button className="capture-btn skip" onClick={() => setStep('form')}>
                     <i className="fas fa-keyboard"></i>
@@ -263,6 +294,17 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
                   <button className="btn-del-sm" onClick={() => setForm({ ...form, imagen_url: '' })}><i className="fas fa-times"></i></button>
                 </div>
               )}
+              {photoPreviews.length > 0 && (
+                <div className="photo-grid">
+                  {photoPreviews.map((src, idx) => (
+                    <div key={`${src}-${idx}`} className="preview-image">
+                      <img src={src} alt={`Foto ${idx + 1}`} />
+                    </div>
+                  ))}
+                  <small>{photoPreviews.length}/10 fotos</small>
+                </div>
+              )}
+              {uploadState !== 'idle' && <small>Estado fotos: {uploadState}</small>}
             </div>
           )}
         </div>
