@@ -56,6 +56,7 @@ export default function App() {
       estado: filtros.estado || undefined,
       prioridad: filtros.prioridad || undefined,
       asignado_a: filtros.asignado_a ? Number(filtros.asignado_a) : undefined,
+      cargador: filtros.cargador || undefined,
       tag: filtros.tag ? Number(filtros.tag) : undefined,
     }) as Promise<Tarjeta[]>,
     refetchOnWindowFocus: false,
