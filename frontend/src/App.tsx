@@ -88,8 +88,8 @@ export default function App() {
     s.on('connect', () => setConnStatus('connected'));
     s.on('disconnect', () => setConnStatus('disconnected'));
     s.on('connect_error', () => setConnStatus('disconnected'));
-    s.on('tarjeta_creada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); qc.invalidateQueries({ queryKey: ['notificaciones'] }); });
-    s.on('tarjeta_actualizada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); qc.invalidateQueries({ queryKey: ['notificaciones'] }); });
+    s.on('tarjeta_creada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); });
+    s.on('tarjeta_actualizada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); });
     s.on('tarjeta_eliminada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); });
     s.on('tarjetas_reordenadas', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); });
     // socket reference kept in closure

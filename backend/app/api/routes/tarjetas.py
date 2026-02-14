@@ -386,6 +386,7 @@ async def update_tarjeta(
                 pass
 
     # Cambio de estado
+    notificaciones_creadas = 0
     if "columna" in upd:
         nuevo = upd["columna"]
         valid_statuses = _get_valid_statuses(db)
@@ -415,7 +416,7 @@ async def update_tarjeta(
                 changed_by_name=user.full_name if user else None,
             ))
             # Mejora #9: Notificaciones
-            notificar_cambio_estado(db, t, old_status, nuevo)
+            notificaciones_creadas = notificar_cambio_estado(db, t, old_status, nuevo)
 
         t.status = nuevo
         if nuevo == "diagnosticada" and not t.diagnosticada_date:
@@ -432,6 +433,8 @@ async def update_tarjeta(
     result = _enrich_tarjeta(t, db)
     try:
         await sio.emit("tarjeta_actualizada", result)
+        if notificaciones_creadas:
+            await sio.emit("notificacion_nueva", {"tarjeta_id": t.id, "count": notificaciones_creadas})
     except Exception:
         pass
     return result
