@@ -12,6 +12,7 @@ import NotificationCenter from './components/NotificationCenter';
 import Toast from './components/Toast';
 import { useDebounce } from './hooks/useDebounce';
 import { API_BASE } from './api/client';
+import { getUiErrorFeedback } from './utils/errorMessaging';
 
 const NuevaTarjetaModal = lazy(() => import('./components/NuevaTarjetaModal'));
 const EditarTarjetaModal = lazy(() => import('./components/EditarTarjetaModal'));
@@ -49,7 +50,7 @@ export default function App() {
   const [toast, setToast] = useState<{ msg: string; type: string } | null>(null);
 
   // Queries
-  const { data: tarjetas = [], isLoading: loadingCards } = useQuery<Tarjeta[]>({
+  const { data: tarjetas = [], isLoading: loadingCards, error: tarjetasError } = useQuery<Tarjeta[]>({
     queryKey: ['tarjetas', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
     queryFn: () => api.getTarjetas({
       search: debouncedSearch || undefined,
@@ -62,23 +63,31 @@ export default function App() {
     enabled: isAuthenticated,
   });
 
-  const { data: columnas = [] } = useQuery<KanbanColumn[]>({
+  const { data: columnas = [], error: columnasError } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],
     queryFn: api.getColumnas,
     enabled: isAuthenticated,
   });
 
-  const { data: allTags = [] } = useQuery<Tag[]>({
+  const { data: allTags = [], error: tagsError } = useQuery<Tag[]>({
     queryKey: ['tags'],
     queryFn: api.getTags,
     enabled: isAuthenticated,
   });
 
-  const { data: users = [] } = useQuery<UserInfo[]>({
+  const { data: users = [], error: usersError } = useQuery<UserInfo[]>({
     queryKey: ['users'],
     queryFn: api.getUsers,
     enabled: isAuthenticated,
   });
+
+
+  useEffect(() => {
+    const currentError = tarjetasError || columnasError || tagsError || usersError;
+    if (!currentError) return;
+    const feedback = getUiErrorFeedback(currentError, 'Ocurrió un error al cargar información inicial.');
+    setToast({ msg: `${feedback.message} ${feedback.actionLabel}.`, type: 'warning' });
+  }, [tarjetasError, columnasError, tagsError, usersError]);
 
   // Socket.IO
   useEffect(() => {

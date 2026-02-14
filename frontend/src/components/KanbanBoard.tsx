@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import type { Tarjeta, KanbanColumn } from '../api/client';
 import SortableTarjetaCard from './SortableTarjetaCard';
 import TarjetaCard from './TarjetaCard';
+import { getUiErrorFeedback } from '../utils/errorMessaging';
 
 interface Props {
   columnas: KanbanColumn[];
@@ -22,6 +23,7 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
   const qc = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
@@ -30,12 +32,20 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
 
   const batchMutation = useMutation({
     mutationFn: (items: { id: number; columna: string; posicion: number }[]) => api.batchUpdatePositions(items),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarjetas'] }),
+    onSuccess: () => { setErrorMessage(''); qc.invalidateQueries({ queryKey: ['tarjetas'] }); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo actualizar la posición de la tarjeta.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteTarjeta(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarjetas'] }),
+    onSuccess: () => { setErrorMessage(''); qc.invalidateQueries({ queryKey: ['tarjetas'] }); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo eliminar la tarjeta.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
 
   // Agrupar tarjetas por columna
@@ -133,6 +143,7 @@ export default function KanbanBoard({ columnas, tarjetas, onEdit, groupBy = 'non
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter}
       onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+      {errorMessage && <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {errorMessage}</div>}
       <div className="kanban-board">
         {columnas.map(col => {
           const cards = tarjetasPorColumna[col.key] || [];

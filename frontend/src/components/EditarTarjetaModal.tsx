@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tarjeta, SubTask, CommentItem, Tag, UserInfo } from '../api/client';
 import ConfirmModal from './ConfirmModal';
+import { getUiErrorFeedback } from '../utils/errorMessaging';
 
 interface Props {
   tarjeta: Tarjeta;
@@ -36,6 +37,7 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
   const [newComment, setNewComment] = useState('');
   const [showDelete, setShowDelete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Queries
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags });
@@ -53,50 +55,81 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
   // Mutations
   const updateMut = useMutation({
     mutationFn: (data: any) => api.updateTarjeta(tarjeta.id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
+    onSuccess: () => { setErrorMessage(''); qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo guardar la tarjeta.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
   const deleteMut = useMutation({
     mutationFn: () => api.deleteTarjeta(tarjeta.id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
+    onSuccess: () => { setErrorMessage(''); qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo eliminar la tarjeta.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
   const addSubtaskMut = useMutation({
     mutationFn: (title: string) => api.createSubTask(tarjeta.id, title),
-    onSuccess: () => { refetchSubtasks(); setNewSubtask(''); },
+    onSuccess: () => { setErrorMessage(''); refetchSubtasks(); setNewSubtask(''); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo crear la subtarea.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
   const toggleSubtaskMut = useMutation({
     mutationFn: (s: SubTask) => api.updateSubTask(s.id, { completed: !s.completed }),
-    onSuccess: () => refetchSubtasks(),
+    onSuccess: () => { setErrorMessage(''); refetchSubtasks(); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo actualizar la subtarea.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
   const delSubtaskMut = useMutation({
     mutationFn: (id: number) => api.deleteSubTask(id),
-    onSuccess: () => refetchSubtasks(),
+    onSuccess: () => { setErrorMessage(''); refetchSubtasks(); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo eliminar la subtarea.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
   const addCommentMut = useMutation({
     mutationFn: (content: string) => api.createComment(tarjeta.id, content),
-    onSuccess: () => { refetchComments(); setNewComment(''); },
+    onSuccess: () => { setErrorMessage(''); refetchComments(); setNewComment(''); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo crear el comentario.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
   const delCommentMut = useMutation({
     mutationFn: (id: number) => api.deleteComment(id),
-    onSuccess: () => refetchComments(),
+    onSuccess: () => { setErrorMessage(''); refetchComments(); },
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo eliminar el comentario.');
+      setErrorMessage(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
 
   const handleSave = async () => {
     setSaving(true);
-    await updateMut.mutateAsync({
-      nombre_propietario: form.nombre_propietario,
-      problema: form.problema,
-      whatsapp: form.whatsapp,
-      fecha_limite: form.fecha_limite,
-      tiene_cargador: form.tiene_cargador,
-      notas_tecnicas: form.notas_tecnicas,
-      prioridad: form.prioridad,
-      asignado_a: form.asignado_a ? Number(form.asignado_a) : null,
-      costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : null,
-      costo_final: form.costo_final ? Number(form.costo_final) : null,
-      notas_costo: form.notas_costo || null,
-      tags: selectedTags,
-    });
-    setSaving(false);
+    try {
+      await updateMut.mutateAsync({
+        nombre_propietario: form.nombre_propietario,
+        problema: form.problema,
+        whatsapp: form.whatsapp,
+        fecha_limite: form.fecha_limite,
+        tiene_cargador: form.tiene_cargador,
+        notas_tecnicas: form.notas_tecnicas,
+        prioridad: form.prioridad,
+        asignado_a: form.asignado_a ? Number(form.asignado_a) : null,
+        costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : null,
+        costo_final: form.costo_final ? Number(form.costo_final) : null,
+        notas_costo: form.notas_costo || null,
+        tags: selectedTags,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -125,6 +158,7 @@ export default function EditarTarjetaModal({ tarjeta, onClose }: Props) {
           </div>
 
           <div className="modal-pro-body">
+            {errorMessage && <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {errorMessage}</div>}
             {/* Info Tab */}
             {tab === 'info' && (
               <div className="edit-form">
