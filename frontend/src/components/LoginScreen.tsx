@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { getUiErrorFeedback } from '../utils/errorMessaging';
 
 const AVATAR_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#00ACC1', '#6366f1'];
 
@@ -25,9 +24,8 @@ export default function LoginScreen() {
             } else {
                 await register({ username, password, full_name: fullName || username, email: email || undefined, avatar_color: avatarColor });
             }
-        } catch (err: unknown) {
-            const feedback = getUiErrorFeedback(err, 'No se pudo iniciar sesión.');
-            setError(`${feedback.message} ${feedback.actionLabel}.`);
+        } catch (err: any) {
+            setError(err.message || 'Error de autenticación');
         }
         setLoading(false);
     };

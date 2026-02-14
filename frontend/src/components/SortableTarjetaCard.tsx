@@ -10,10 +10,9 @@ interface Props {
     onDelete: (id: number) => void;
     onMove: (id: number, col: string) => void;
     compact?: boolean;
-    keepSpaceWhileDragging?: boolean;
 }
 
-export default function SortableTarjetaCard({ tarjeta, columnas, onEdit, onDelete, onMove, compact, keepSpaceWhileDragging = false }: Props) {
+export default function SortableTarjetaCard({ tarjeta, columnas, onEdit, onDelete, onMove, compact }: Props) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: tarjeta.id,
     });
@@ -21,8 +20,7 @@ export default function SortableTarjetaCard({ tarjeta, columnas, onEdit, onDelet
     const style = {
         transform: CSS.Transform.toString(transform),
         transition,
-        opacity: isDragging ? (keepSpaceWhileDragging ? 0 : 0.4) : 1,
-        visibility: isDragging && keepSpaceWhileDragging ? 'hidden' as const : 'visible' as const,
+        opacity: isDragging ? 0.4 : 1,
         cursor: 'grab',
     };
 

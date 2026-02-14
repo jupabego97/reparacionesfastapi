@@ -1,6 +1,5 @@
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,74 +20,14 @@ from app.api.routes import health, tarjetas, estadisticas, exportar, multimedia
 from app.api.routes import auth, kanban as kanban_routes
 from app.api.routes.multimedia import executor
 
-
-def _run_startup_checks(settings) -> None:
-    """Checks rápidos de configuración y conectividad para fail-fast."""
-    from sqlalchemy import text
-    from app.core.database import SessionLocal
-
-    if (
-        settings.is_production
-        and not settings.allow_insecure_jwt_secret
-        and settings.jwt_secret == "change-me-in-production-nanotronics-2024"
-    ):
-        raise RuntimeError(
-            "JWT_SECRET inseguro en producción. Configura una clave fuerte antes de arrancar "
-            "o define ALLOW_INSECURE_JWT_SECRET=true solo para contingencias."
-        )
-
-    db = SessionLocal()
-    try:
-        db.execute(text("SELECT 1"))
-    finally:
-        db.close()
-
-
-def _verify_migration_version(settings) -> None:
-    """Verifica que la BD esté en la revisión Alembic esperada."""
-    if not settings.is_production:
-        return
-
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-    from sqlalchemy import inspect, text
-    from app.core.database import SessionLocal
-
-    backend_root = Path(__file__).resolve().parents[1]
-    alembic_cfg = Config(str(backend_root / "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", str(backend_root / "alembic"))
-
-    script = ScriptDirectory.from_config(alembic_cfg)
-    expected_heads = set(script.get_heads())
-
-    db = SessionLocal()
-    try:
-        inspector = inspect(db.get_bind())
-        if "alembic_version" not in inspector.get_table_names():
-            raise RuntimeError("Falta tabla alembic_version. Ejecuta migraciones antes de iniciar.")
-
-        current = {row[0] for row in db.execute(text("SELECT version_num FROM alembic_version")) if row[0]}
-    finally:
-        db.close()
-
-    if current != expected_heads:
-        raise RuntimeError(
-            f"Migraciones pendientes o desalineadas (db={sorted(current)}, esperadas={sorted(expected_heads)}). "
-            "Ejecuta: python -m alembic upgrade head"
-        )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_logging(settings.environment)
-    _run_startup_checks(settings)
-    _verify_migration_version(settings)
-
-    # En desarrollo permitimos bootstrap automático para acelerar onboarding local.
-    if not settings.is_production:
-        Base.metadata.create_all(bind=engine)
-
+    # Crear tablas NUEVAS si no existen (no altera columnas en tablas existentes)
+    Base.metadata.create_all(bind=engine)
+    # Migrar columnas faltantes en tablas existentes
+    _auto_migrate_columns()
     # Crear admin por defecto
     from app.core.database import SessionLocal
     from app.services.auth_service import create_default_admin
@@ -120,6 +59,81 @@ async def lifespan(app: FastAPI):
             sys.stderr.write(f"Warning: sequence fix failed: {e}\n")
     yield
     executor.shutdown(wait=True)
+
+
+def _auto_migrate_columns():
+    """Añade columnas faltantes a tablas existentes (PostgreSQL: IF NOT EXISTS)."""
+    from sqlalchemy import text, inspect
+    from app.core.database import SessionLocal
+    from loguru import logger
+
+    db = SessionLocal()
+    try:
+        dialect = db.get_bind().dialect.name
+        inspector = inspect(db.get_bind())
+
+        # Solo migrar si la tabla repair_cards existe
+        if "repair_cards" not in inspector.get_table_names():
+            logger.info("repair_cards table does not exist yet, skipping migration")
+            return
+
+        existing = {c["name"] for c in inspector.get_columns("repair_cards")}
+        logger.info(f"Existing columns: {sorted(existing)}")
+
+        # Renombrar columnas mal nombradas de deploys anteriores
+        renames = [
+            ("prioridad", "priority"),
+            ("asignado_nombre", "assigned_name"),
+            ("costo_estimado", "estimated_cost"),
+            ("costo_final", "final_cost"),
+            ("notas_costo", "cost_notes"),
+        ]
+        if dialect == "postgresql":
+            for old_name, new_name in renames:
+                if old_name in existing and new_name not in existing:
+                    # Rename old to new
+                    db.execute(text(f"ALTER TABLE repair_cards RENAME COLUMN {old_name} TO {new_name}"))
+                    existing.discard(old_name)
+                    existing.add(new_name)
+                    logger.info(f"Renamed column: {old_name} -> {new_name}")
+                elif old_name in existing and new_name in existing:
+                    # Both exist — drop the old duplicate
+                    db.execute(text(f"ALTER TABLE repair_cards DROP COLUMN {old_name}"))
+                    existing.discard(old_name)
+                    logger.info(f"Dropped duplicate column: {old_name} (keeping {new_name})")
+
+        # Agregar columnas faltantes
+        migrations = [
+            ("priority", "VARCHAR(20) DEFAULT 'media'"),
+            ("position", "INTEGER DEFAULT 0"),
+            ("assigned_to", "INTEGER"),
+            ("assigned_name", "VARCHAR(200)"),
+            ("estimated_cost", "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"),
+            ("final_cost", "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"),
+            ("cost_notes", "TEXT"),
+            ("deleted_at", "TIMESTAMP"),
+        ]
+
+        for col_name, col_type in migrations:
+            if col_name not in existing:
+                try:
+                    if dialect == "postgresql":
+                        db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                    else:
+                        db.execute(text(f"ALTER TABLE repair_cards ADD COLUMN {col_name} {col_type}"))
+                    logger.info(f"Added column: repair_cards.{col_name} ({col_type})")
+                except Exception as col_err:
+                    logger.warning(f"Could not add column {col_name}: {col_err}")
+
+        db.commit()
+        # Verify
+        updated = {c["name"] for c in inspector.get_columns("repair_cards")}
+        logger.info(f"Migration done. Columns now: {sorted(updated)}")
+    except Exception as e:
+        logger.error(f"Auto-migration error: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def create_app() -> FastAPI:

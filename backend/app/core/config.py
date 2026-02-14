@@ -12,7 +12,6 @@ class Settings(BaseSettings):
 
     # --- Auth (Mejora #6) ---
     jwt_secret: str = "change-me-in-production-nanotronics-2024"
-    allow_insecure_jwt_secret: bool = False
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480  # 8 horas
 

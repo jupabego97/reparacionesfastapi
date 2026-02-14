@@ -121,114 +121,6 @@ export interface NotificationItem {
   created_at: string | null;
 }
 
-export type ApiErrorKind = 'auth' | 'validation' | 'network' | 'server' | 'unknown';
-
-export class ApiError extends Error {
-  status?: number;
-  kind: ApiErrorKind;
-  requestId?: string;
-  action: 'reintentar' | 'reautenticar' | 'contactar_soporte';
-
-  constructor(message: string, options: { status?: number; kind: ApiErrorKind; requestId?: string; action: 'reintentar' | 'reautenticar' | 'contactar_soporte' }) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = options.status;
-    this.kind = options.kind;
-    this.requestId = options.requestId;
-    this.action = options.action;
-  }
-}
-
-function extractRequestId(headers: Headers): string | undefined {
-  return headers.get('x-request-id') || headers.get('x-correlation-id') || headers.get('request-id') || undefined;
-}
-
-function readApiMessage(payload: unknown): string {
-  if (!payload) return '';
-  if (typeof payload === 'string') return payload.trim();
-  if (typeof payload === 'object') {
-    const source = payload as Record<string, unknown>;
-    const detail = source.detail;
-    if (typeof detail === 'string') return detail;
-    if (Array.isArray(detail)) {
-      const firstItem = detail[0] as Record<string, unknown> | undefined;
-      if (firstItem?.msg && typeof firstItem.msg === 'string') return firstItem.msg;
-    }
-    if (typeof source.error === 'string') return source.error;
-    if (typeof source.message === 'string') return source.message;
-  }
-  return '';
-}
-
-function buildFriendlyError(status: number, rawMessage: string, requestId?: string): ApiError {
-  const trace = requestId ? ` (ID solicitud: ${requestId})` : '';
-  if (status === 401 || status === 403) {
-    return new ApiError(`Tu sesión no es válida o expiró. Acción sugerida: reautenticar.${trace}`, {
-      status, kind: 'auth', requestId, action: 'reautenticar',
-    });
-  }
-  if (status === 400 || status === 422) {
-    return new ApiError(`${rawMessage || 'Hay datos inválidos en la solicitud.'} Acción sugerida: reintentar.${trace}`, {
-      status, kind: 'validation', requestId, action: 'reintentar',
-    });
-  }
-  if (status >= 500) {
-    return new ApiError(`El servidor tuvo un problema al procesar la solicitud. Acción sugerida: reintentar.${trace}`, {
-      status, kind: 'server', requestId, action: 'reintentar',
-    });
-  }
-  return new ApiError(`${rawMessage || 'No se pudo completar la operación.'} Acción sugerida: reintentar.${trace}`, {
-    status, kind: 'unknown', requestId, action: 'reintentar',
-  });
-}
-
-export async function parseApiError(response: Response): Promise<ApiError> {
-  const contentType = response.headers.get('content-type') || '';
-  const requestId = extractRequestId(response.headers);
-
-  let message = '';
-  if (contentType.includes('application/json')) {
-    try {
-      const json = await response.json();
-      message = readApiMessage(json);
-    } catch {
-      message = '';
-    }
-  } else {
-    try {
-      message = (await response.text()).trim();
-    } catch {
-      message = '';
-    }
-  }
-
-  return buildFriendlyError(response.status, message, requestId);
-}
-
-export function toApiError(error: unknown): ApiError {
-  if (error instanceof ApiError) return error;
-  if (error instanceof Error && /fetch|network|failed/i.test(error.message)) {
-    return new ApiError('No pudimos conectar con el servidor. Acción sugerida: reintentar.', {
-      kind: 'network', action: 'reintentar',
-    });
-  }
-  return new ApiError('Ocurrió un error inesperado. Acción sugerida: reintentar.', {
-    kind: 'unknown', action: 'reintentar',
-  });
-}
-
-async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  try {
-    return await fetch(input, init);
-  } catch (error) {
-    throw toApiError(error);
-  }
-}
-
-async function ensureOk(res: Response): Promise<void> {
-  if (!res.ok) throw await parseApiError(res);
-}
-
 // --- Helper para auth header ---
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('token');
@@ -242,29 +134,29 @@ function jsonHeaders(): Record<string, string> {
 export const api = {
   // --- Auth ---
   async login(username: string, password: string): Promise<{ access_token: string; user: UserInfo }> {
-    const res = await apiFetch(`${API_BASE}/api/auth/login`, {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async register(data: { username: string; password: string; full_name?: string; email?: string; role?: string; avatar_color?: string }): Promise<{ access_token: string; user: UserInfo }> {
-    const res = await apiFetch(`${API_BASE}/api/auth/register`, {
+    const res = await fetch(`${API_BASE}/api/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getMe(): Promise<UserInfo> {
-    const res = await apiFetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getUsers(): Promise<UserInfo[]> {
-    const res = await apiFetch(`${API_BASE}/api/auth/users`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/auth/users`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
@@ -280,175 +172,173 @@ export const api = {
     if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
     if (params?.cargador) search.set('cargador', params.cargador);
     if (params?.tag != null) search.set('tag', String(params.tag));
-    const res = await apiFetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
+    const res = await fetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
       headers: authHeaders(),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async createTarjeta(data: TarjetaCreate): Promise<Tarjeta> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas`, {
+    const res = await fetch(`${API_BASE}/api/tarjetas`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async updateTarjeta(id: number, data: TarjetaUpdate): Promise<Tarjeta> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${id}`, {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async deleteTarjeta(id: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${id}`, { method: 'DELETE', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
   async restoreTarjeta(id: number): Promise<Tarjeta> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${id}/restore`, { method: 'PUT', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/restore`, { method: 'PUT', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async batchUpdatePositions(items: { id: number; columna: string; posicion: number }[]): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/batch/positions`, {
+    const res = await fetch(`${API_BASE}/api/tarjetas/batch/positions`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ items }),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
   },
   async getHistorial(id: number): Promise<{ id: number; tarjeta_id: number; old_status: string | null; new_status: string; changed_at: string | null; changed_by_name: string | null }[]> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${id}/historial`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/historial`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getTrash(): Promise<Tarjeta[]> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/trash/list`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/trash/list`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   // --- Estadísticas ---
   async getEstadisticas(): Promise<object> {
-    const res = await apiFetch(`${API_BASE}/api/estadisticas`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/estadisticas`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   // --- Columnas ---
   async getColumnas(): Promise<KanbanColumn[]> {
-    const res = await apiFetch(`${API_BASE}/api/columnas`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/columnas`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async createColumna(data: Partial<KanbanColumn>): Promise<KanbanColumn> {
-    const res = await apiFetch(`${API_BASE}/api/columnas`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/columnas`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async updateColumna(id: number, data: Partial<KanbanColumn>): Promise<KanbanColumn> {
-    const res = await apiFetch(`${API_BASE}/api/columnas/${id}`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data) });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data) });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async deleteColumna(id: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/columnas/${id}`, { method: 'DELETE', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
 
   // --- Tags ---
   async getTags(): Promise<Tag[]> {
-    const res = await apiFetch(`${API_BASE}/api/tags`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tags`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async createTag(data: { name: string; color?: string }): Promise<Tag> {
-    const res = await apiFetch(`${API_BASE}/api/tags`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tags`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async deleteTag(id: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/tags/${id}`, { method: 'DELETE', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tags/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
   async addTagToTarjeta(tarjetaId: number, tagId: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'POST', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'POST', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
   async removeTagFromTarjeta(tarjetaId: number, tagId: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'DELETE', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
 
   // --- SubTasks ---
   async getSubTasks(tarjetaId: number): Promise<SubTask[]> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async createSubTask(tarjetaId: number, title: string): Promise<SubTask> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ title }),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async updateSubTask(id: number, data: { completed?: boolean; title?: string }): Promise<SubTask> {
-    const res = await apiFetch(`${API_BASE}/api/subtasks/${id}`, {
+    const res = await fetch(`${API_BASE}/api/subtasks/${id}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async deleteSubTask(id: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/subtasks/${id}`, { method: 'DELETE', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/subtasks/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
 
   // --- Comments ---
   async getComments(tarjetaId: number): Promise<CommentItem[]> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async createComment(tarjetaId: number, content: string): Promise<CommentItem> {
-    const res = await apiFetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ content }),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async deleteComment(id: number): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/comments/${id}`, { method: 'DELETE', headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/comments/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
   },
 
   // --- Notificaciones ---
   async getNotificaciones(unreadOnly = false): Promise<{ notifications: NotificationItem[]; unread_count: number }> {
-    const res = await apiFetch(`${API_BASE}/api/notificaciones?unread_only=${unreadOnly}`, { headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/notificaciones?unread_only=${unreadOnly}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async markNotificationsRead(ids: number[]): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/notificaciones/mark-read`, {
+    await fetch(`${API_BASE}/api/notificaciones/mark-read`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ ids }),
     });
-    await ensureOk(res);
   },
   async markAllNotificationsRead(): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/api/notificaciones/mark-all-read`, { method: 'PUT', headers: authHeaders() });
-    await ensureOk(res);
+    await fetch(`${API_BASE}/api/notificaciones/mark-all-read`, { method: 'PUT', headers: authHeaders() });
   },
 
   // --- Multimedia ---
   async procesarImagen(imageData: string): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean }> {
-    const res = await apiFetch(`${API_BASE}/api/procesar-imagen`, {
+    const res = await fetch(`${API_BASE}/api/procesar-imagen`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ image: imageData }),
     });
-    await ensureOk(res);
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async transcribirAudio(formData: FormData): Promise<{ transcripcion: string }> {
-    const res = await apiFetch(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });
-    await ensureOk(res);
+    const res = await fetch(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async exportar(params: { formato: string; estado?: string; fecha_desde?: string; fecha_hasta?: string }): Promise<Blob> {
@@ -456,8 +346,8 @@ export const api = {
     if (params.estado && params.estado !== 'todos') search.set('estado', params.estado)
     if (params.fecha_desde) search.set('fecha_desde', params.fecha_desde)
     if (params.fecha_hasta) search.set('fecha_hasta', params.fecha_hasta)
-    const res = await apiFetch(`${API_BASE}/api/exportar?${search}`, { headers: authHeaders() })
-    await ensureOk(res)
+    const res = await fetch(`${API_BASE}/api/exportar?${search}`, { headers: authHeaders() })
+    if (!res.ok) throw new Error(await res.text())
     return res.blob()
   },
 };
