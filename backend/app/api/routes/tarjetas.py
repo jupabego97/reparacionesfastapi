@@ -37,6 +37,27 @@ def _get_valid_statuses(db: Session) -> list[str]:
     return ["ingresado", "diagnosticada", "para_entregar", "listos"]
 
 
+def _calculate_dias_en_columna(t: RepairCard, now: Optional[datetime] = None) -> int:
+    """Calcula los días transcurridos según la columna/estado actual de la tarjeta."""
+    now_utc = now or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+    status_date_map = {
+        "ingresado": t.ingresado_date,
+        "diagnosticada": t.diagnosticada_date,
+        "para_entregar": t.para_entregar_date,
+        "listos": t.entregados_date,
+    }
+    status_date = status_date_map.get(t.status)
+    if not status_date:
+        return 0
+
+    if status_date.tzinfo is None:
+        status_date = status_date.replace(tzinfo=timezone.utc)
+    return (now_utc - status_date).days
+
+
 def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> dict:
     """Enriquece una sola tarjeta (para endpoints de detalle)."""
     d = t.to_dict(include_image=include_image)
@@ -49,18 +70,8 @@ def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> d
     d["subtasks_total"] = len(subtasks)
     d["subtasks_done"] = sum(1 for s in subtasks if s.completed)
     d["comments_count"] = db.query(Comment).filter(Comment.tarjeta_id == t.id).count()
-    now = datetime.utcnow()
     try:
-        if t.status == "ingresado" and t.ingresado_date:
-            d["dias_en_columna"] = (now - t.ingresado_date).days
-        elif t.status == "diagnosticada" and t.diagnosticada_date:
-            d["dias_en_columna"] = (now - t.diagnosticada_date).days
-        elif t.status == "para_entregar" and t.para_entregar_date:
-            d["dias_en_columna"] = (now - t.para_entregar_date).days
-        elif t.status == "listos" and t.entregados_date:
-            d["dias_en_columna"] = (now - t.entregados_date).days
-        else:
-            d["dias_en_columna"] = 0
+        d["dias_en_columna"] = _calculate_dias_en_columna(t)
     except Exception:
         d["dias_en_columna"] = 0
     return d
@@ -114,7 +125,7 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
         comment_counts[row[0]] = row[1]
 
     # --- Build enriched dicts ---
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     result = []
     for t in items:
         d = t.to_dict(include_image=include_image)
@@ -123,16 +134,7 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
         d["subtasks_done"] = subtask_done.get(t.id, 0)
         d["comments_count"] = comment_counts.get(t.id, 0)
         try:
-            if t.status == "ingresado" and t.ingresado_date:
-                d["dias_en_columna"] = (now - t.ingresado_date).days
-            elif t.status == "diagnosticada" and t.diagnosticada_date:
-                d["dias_en_columna"] = (now - t.diagnosticada_date).days
-            elif t.status == "para_entregar" and t.para_entregar_date:
-                d["dias_en_columna"] = (now - t.para_entregar_date).days
-            elif t.status == "listos" and t.entregados_date:
-                d["dias_en_columna"] = (now - t.entregados_date).days
-            else:
-                d["dias_en_columna"] = 0
+            d["dias_en_columna"] = _calculate_dias_en_columna(t, now=now)
         except Exception:
             d["dias_en_columna"] = 0
         result.append(d)
@@ -241,7 +243,7 @@ async def create_tarjeta(
         due_dt = datetime.now(timezone.utc) + timedelta(days=1)
     else:
         from datetime import time
-        due_dt = datetime.combine(fecha_limite, time.min)
+        due_dt = datetime.combine(fecha_limite, time.min, tzinfo=timezone.utc)
 
     # Mejora #22: Upload image to S3 if enabled
     imagen_url = data.imagen_url
