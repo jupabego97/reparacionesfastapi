@@ -55,6 +55,8 @@ En el **servicio backend** → **Settings** → **Deploy**:
   cd backend && python -m alembic upgrade head
   ```
 
+> Importante: el backend ahora valida en startup que la BD esté exactamente en `alembic head` (fail-fast en producción). Si falta una migración, el servicio no inicia.
+
 O desde la consola del servicio backend:
 ```bash
 cd backend && python -m alembic upgrade head
