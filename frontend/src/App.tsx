@@ -19,6 +19,46 @@ const EstadisticasModal = lazy(() => import('./components/EstadisticasModal'));
 const ExportarModal = lazy(() => import('./components/ExportarModal'));
 
 type ThemeMode = 'light' | 'dark';
+type TarjetasCache = Tarjeta[] | { tarjetas: Tarjeta[]; pagination: object };
+type SocketTarjetaPayload = Partial<Tarjeta> & { id: number; columna: string; posicion: number };
+
+function buildTarjetaFromSocket(payload: SocketTarjetaPayload): Tarjeta {
+  return {
+    id: payload.id,
+    nombre_propietario: payload.nombre_propietario ?? 'Cliente',
+    problema: payload.problema ?? 'Sin descripción',
+    whatsapp: payload.whatsapp ?? null,
+    fecha_inicio: payload.fecha_inicio ?? null,
+    fecha_limite: payload.fecha_limite ?? null,
+    columna: payload.columna,
+    tiene_cargador: payload.tiene_cargador ?? null,
+    fecha_diagnosticada: payload.fecha_diagnosticada ?? null,
+    fecha_para_entregar: payload.fecha_para_entregar ?? null,
+    fecha_entregada: payload.fecha_entregada ?? null,
+    notas_tecnicas: payload.notas_tecnicas ?? null,
+    imagen_url: payload.imagen_url ?? null,
+    prioridad: payload.prioridad ?? 'media',
+    posicion: payload.posicion,
+    asignado_a: payload.asignado_a ?? null,
+    asignado_nombre: payload.asignado_nombre ?? null,
+    costo_estimado: payload.costo_estimado ?? null,
+    costo_final: payload.costo_final ?? null,
+    notas_costo: payload.notas_costo ?? null,
+    eliminado: payload.eliminado ?? false,
+    tags: payload.tags ?? [],
+    subtasks_total: payload.subtasks_total ?? 0,
+    subtasks_done: payload.subtasks_done ?? 0,
+    comments_count: payload.comments_count ?? 0,
+    dias_en_columna: payload.dias_en_columna ?? 0,
+  };
+}
+
+function patchTarjetasData(data: TarjetasCache | undefined, patcher: (items: Tarjeta[]) => Tarjeta[]): TarjetasCache | undefined {
+  if (!data) return data;
+  if (Array.isArray(data)) return patcher(data);
+  if (Array.isArray(data.tarjetas)) return { ...data, tarjetas: patcher(data.tarjetas) };
+  return data;
+}
 
 export default function App() {
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
@@ -89,9 +129,41 @@ export default function App() {
     s.on('connect', () => setConnStatus('connected'));
     s.on('disconnect', () => setConnStatus('disconnected'));
     s.on('connect_error', () => setConnStatus('disconnected'));
-    s.on('tarjeta_creada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); qc.invalidateQueries({ queryKey: ['notificaciones'] }); });
-    s.on('tarjeta_actualizada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); qc.invalidateQueries({ queryKey: ['notificaciones'] }); });
-    s.on('tarjeta_eliminada', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); });
+    s.on('tarjeta_creada', (payload?: SocketTarjetaPayload) => {
+      if (payload?.id != null) {
+        qc.setQueriesData<TarjetasCache>({ queryKey: ['tarjetas'] }, current => patchTarjetasData(current, items => {
+          const existingIdx = items.findIndex(t => t.id === payload.id);
+          if (existingIdx >= 0) {
+            const next = [...items];
+            next[existingIdx] = { ...next[existingIdx], ...payload };
+            return next;
+          }
+          return [buildTarjetaFromSocket(payload), ...items];
+        }));
+      } else {
+        qc.invalidateQueries({ queryKey: ['tarjetas'] });
+      }
+      qc.invalidateQueries({ queryKey: ['notificaciones'] });
+    });
+    s.on('tarjeta_actualizada', (payload?: Partial<Tarjeta> & { id?: number }) => {
+      if (payload?.id != null) {
+        qc.setQueriesData<TarjetasCache>({ queryKey: ['tarjetas'] }, current => patchTarjetasData(current, items =>
+          items.map(t => t.id === payload.id ? { ...t, ...payload } : t)
+        ));
+      } else {
+        qc.invalidateQueries({ queryKey: ['tarjetas'] });
+      }
+      qc.invalidateQueries({ queryKey: ['notificaciones'] });
+    });
+    s.on('tarjeta_eliminada', (payload?: { id?: number }) => {
+      if (payload?.id != null) {
+        qc.setQueriesData<TarjetasCache>({ queryKey: ['tarjetas'] }, current => patchTarjetasData(current, items =>
+          items.filter(t => t.id !== payload.id)
+        ));
+      } else {
+        qc.invalidateQueries({ queryKey: ['tarjetas'] });
+      }
+    });
     s.on('tarjetas_reordenadas', () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); });
     // socket reference kept in closure
     setConnStatus('connecting');
