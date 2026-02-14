@@ -16,6 +16,7 @@ from app.core.database import engine
 from app.models.repair_card import Base
 # Importar TODOS los modelos para que se registren con Base.metadata
 from app.models import User, KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags
+from app.models.kanban import CardTemplate  # noqa: F401 — register with metadata
 from app.api.routes import health, tarjetas, estadisticas, exportar, multimedia
 from app.api.routes import auth, kanban as kanban_routes
 from app.api.routes.multimedia import executor
@@ -112,6 +113,9 @@ def _auto_migrate_columns():
             ("final_cost", "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT"),
             ("cost_notes", "TEXT"),
             ("deleted_at", "TIMESTAMP"),
+            ("blocked_at", "TIMESTAMP"),
+            ("blocked_reason", "TEXT"),
+            ("blocked_by", "INTEGER"),
         ]
 
         for col_name, col_type in migrations:
@@ -124,6 +128,52 @@ def _auto_migrate_columns():
                     logger.info(f"Added column: repair_cards.{col_name} ({col_type})")
                 except Exception as col_err:
                     logger.warning(f"Could not add column {col_name}: {col_err}")
+
+        # Migrate kanban_columns
+        if "kanban_columns" in inspector.get_table_names():
+            kc_existing = {c["name"] for c in inspector.get_columns("kanban_columns")}
+            kc_migrations = [
+                ("sla_hours", "INTEGER"),
+                ("required_fields", "TEXT"),
+            ]
+            for col_name, col_type in kc_migrations:
+                if col_name not in kc_existing:
+                    try:
+                        if dialect == "postgresql":
+                            db.execute(text(f"ALTER TABLE kanban_columns ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+                        else:
+                            db.execute(text(f"ALTER TABLE kanban_columns ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"Added column: kanban_columns.{col_name}")
+                    except Exception as col_err:
+                        logger.warning(f"Could not add column kanban_columns.{col_name}: {col_err}")
+
+        # Create card_templates table if missing
+        if "card_templates" not in inspector.get_table_names():
+            try:
+                db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS card_templates (
+                        id SERIAL PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE,
+                        problem_template TEXT,
+                        default_priority VARCHAR(20) DEFAULT 'media',
+                        default_notes TEXT,
+                        estimated_hours DOUBLE PRECISION,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """) if dialect == "postgresql" else text("""
+                    CREATE TABLE IF NOT EXISTS card_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        problem_template TEXT,
+                        default_priority VARCHAR(20) DEFAULT 'media',
+                        default_notes TEXT,
+                        estimated_hours FLOAT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                logger.info("Created table: card_templates")
+            except Exception as tbl_err:
+                logger.warning(f"Could not create card_templates table: {tbl_err}")
 
         db.commit()
         # Verify
@@ -194,6 +244,12 @@ def create_app() -> FastAPI:
     app.include_router(exportar.router)
     app.include_router(multimedia.router)
     app.include_router(kanban_routes.router)
+
+    # Nuevas rutas Kanban Pro
+    from app.api.routes import metricas, actividad, plantillas
+    app.include_router(metricas.router)
+    app.include_router(actividad.router)
+    app.include_router(plantillas.router)
 
     return app
 

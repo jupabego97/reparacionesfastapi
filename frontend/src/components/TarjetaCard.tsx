@@ -1,12 +1,18 @@
-import type { Tarjeta, KanbanColumn } from '../api/client';
+import { memo } from 'react';
+import type { TarjetaBoardItem, KanbanColumn } from '../api/client';
 
 interface Props {
-  tarjeta: Tarjeta;
+  tarjeta: TarjetaBoardItem;
   columnas: KanbanColumn[];
-  onEdit: (t: Tarjeta) => void;
+  onEdit: (t: TarjetaBoardItem) => void;
   onDelete: (id: number) => void;
   onMove: (id: number, newCol: string) => void;
   compact?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: (id: number) => void;
+  onBlock?: (id: number, reason: string) => void;
+  onUnblock?: (id: number) => void;
 }
 
 const PRIORITY_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
@@ -27,19 +33,20 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
-export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact }: Props) {
+function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock }: Props) {
   const t = tarjeta;
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
   const daysColor = timeColor(t.dias_en_columna || 0);
   const whatsNum = t.whatsapp ? t.whatsapp.replace(/\D/g, '') : null;
   const whatsUrl = whatsNum
-    ? `https://wa.me/${whatsNum}?text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparación.`.trim())}`
+    ? `https://wa.me/${whatsNum}?text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim())}`
     : null;
+  const isBlocked = !!t.bloqueada;
 
   if (compact) {
     return (
-      <div className={`tarjeta-card compact ${overdue ? 'overdue' : ''}`} onClick={() => onEdit(t)}>
+      <div className={`tarjeta-card compact ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''}`} onClick={() => onEdit(t)}>
         <div className="tarjeta-compact-row">
           <span className="priority-dot" style={{ background: prio.color }}></span>
           <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
@@ -54,11 +61,21 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
   }
 
   return (
-    <div className={`tarjeta-card ${overdue ? 'overdue' : ''}`}>
-      {/* Priority strip */}
-      <div className="priority-strip" style={{ background: prio.color }}></div>
+    <div className={`tarjeta-card ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''} ${selected ? 'card-selected' : ''}`}>
+      <div className="priority-strip" style={{ background: isBlocked ? '#ef4444' : prio.color }}></div>
 
-      {/* Header */}
+      {selectable && (
+        <div className="card-checkbox" onClick={e => { e.stopPropagation(); onSelect?.(t.id); }}>
+          <i className={selected ? 'fas fa-check-square' : 'far fa-square'}></i>
+        </div>
+      )}
+
+      {isBlocked && (
+        <div className="blocked-banner">
+          <i className="fas fa-lock"></i> Bloqueada{t.motivo_bloqueo ? `: ${t.motivo_bloqueo}` : ''}
+        </div>
+      )}
+
       <div className="tarjeta-header">
         <div className="tarjeta-title-row">
           <i className={prio.icon} style={{ color: prio.color, fontSize: '0.75rem' }} title={`Prioridad ${prio.label}`}></i>
@@ -70,21 +87,18 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
               {t.asignado_nombre.split(' ').map(w => w[0]).join('').slice(0, 2)}
             </span>
           )}
-          {/* Mejora #16: Tiempo en columna */}
           {t.dias_en_columna > 0 && (
-            <span className="days-badge" style={{ color: daysColor }} title={`${t.dias_en_columna} días en esta columna`}>
+            <span className="days-badge" style={{ color: daysColor }} title={`${t.dias_en_columna} dias en esta columna`}>
               <i className="fas fa-clock"></i> {t.dias_en_columna}d
             </span>
           )}
         </div>
       </div>
 
-      {/* Problem */}
-      {t.problema && t.problema !== 'Sin descripción' && (
+      {t.problema && t.problema !== 'Sin descripcion' && (
         <p className="tarjeta-problem">{t.problema.length > 80 ? t.problema.slice(0, 80) + '...' : t.problema}</p>
       )}
 
-      {/* Tags */}
       {t.tags && t.tags.length > 0 && (
         <div className="tarjeta-tags">
           {t.tags.map(tag => (
@@ -95,7 +109,6 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
         </div>
       )}
 
-      {/* Subtasks progress bar (Mejora #3) */}
       {t.subtasks_total > 0 && (
         <div className="subtasks-progress">
           <div className="subtasks-bar">
@@ -105,12 +118,10 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
         </div>
       )}
 
-      {/* Image thumbnail */}
       {t.imagen_url && (
         <img src={t.imagen_url} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
       )}
 
-      {/* Footer */}
       <div className="tarjeta-footer">
         <div className="tarjeta-footer-left">
           {t.fecha_limite && (
@@ -136,6 +147,19 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
           <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar">
             <i className="fas fa-pen"></i>
           </button>
+          {isBlocked ? (
+            <button className="btn-action btn-unblock" onClick={e => { e.stopPropagation(); onUnblock?.(t.id); }} title="Desbloquear">
+              <i className="fas fa-lock-open"></i>
+            </button>
+          ) : (
+            <button className="btn-action btn-block" onClick={e => {
+              e.stopPropagation();
+              const reason = prompt('Motivo del bloqueo:');
+              if (reason !== null) onBlock?.(t.id, reason);
+            }} title="Bloquear">
+              <i className="fas fa-lock"></i>
+            </button>
+          )}
           <select className="move-select" value={t.columna}
             onChange={e => { e.stopPropagation(); onMove(t.id, e.target.value); }}
             onClick={e => e.stopPropagation()}>
@@ -146,3 +170,6 @@ export default function TarjetaCard({ tarjeta, columnas, onEdit, onDelete: _onDe
     </div>
   );
 }
+
+const TarjetaCard = memo(TarjetaCardComponent);
+export default TarjetaCard;

@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, defer
-from sqlalchemy import func, text, or_
+from sqlalchemy import func, text, or_, exists, and_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -139,6 +139,38 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
     return result
 
 
+def _serialize_board_items(items: list[RepairCard], db: Session, include_image: bool) -> list[dict]:
+    """Serializa tarjetas para vista tablero optimizada."""
+    data = _enrich_batch(items, db, include_image=include_image)
+    board_fields = {
+        "id",
+        "nombre_propietario",
+        "problema",
+        "whatsapp",
+        "fecha_limite",
+        "columna",
+        "tiene_cargador",
+        "prioridad",
+        "posicion",
+        "asignado_a",
+        "asignado_nombre",
+        "costo_estimado",
+        "notas_tecnicas",
+        "eliminado",
+        "bloqueada",
+        "motivo_bloqueo",
+        "bloqueada_por",
+        "fecha_bloqueo",
+        "tags",
+        "subtasks_total",
+        "subtasks_done",
+        "comments_count",
+        "dias_en_columna",
+        "imagen_url",
+    }
+    return [{k: v for k, v in item.items() if k in board_fields} for item in data]
+
+
 @router.get("")
 def get_tarjetas(
     db: Session = Depends(get_db),
@@ -155,8 +187,15 @@ def get_tarjetas(
     fecha_hasta: str | None = Query(None),
     cargador: str | None = Query(None),
     include_deleted: bool = Query(False),
+    view: str | None = Query(None),
+    include: str | None = Query(None),
 ):
     include_image = light != 1
+    board_mode = (view or "").lower() == "board"
+    include_opts = {opt.strip().lower() for opt in (include or "").split(",") if opt.strip()}
+    if board_mode:
+        include_image = "image_thumb" in include_opts or "image" in include_opts
+
     q = db.query(RepairCard)
 
     # Mejora #23: Soft delete — excluir eliminadas por defecto
@@ -188,14 +227,38 @@ def get_tarjetas(
     if fecha_hasta:
         q = q.filter(RepairCard.start_date <= datetime.strptime(fecha_hasta, "%Y-%m-%d"))
     if tag is not None:
-        from sqlalchemy import select
-        card_ids = db.execute(
-            select(repair_card_tags.c.repair_card_id).where(repair_card_tags.c.tag_id == tag)
-        ).scalars().all()
-        q = q.filter(RepairCard.id.in_(card_ids)) if card_ids else q.filter(RepairCard.id == -1)
+        q = q.filter(
+            exists(
+                select(repair_card_tags.c.repair_card_id).where(
+                    and_(
+                        repair_card_tags.c.repair_card_id == RepairCard.id,
+                        repair_card_tags.c.tag_id == tag,
+                    )
+                )
+            )
+        )
 
     # Mejora #5: Ordenar por posición dentro de cada estado, luego por prioridad
     q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
+
+    if board_mode:
+        per_page = min(per_page or 200, 500)
+        page = page or 1
+        total = q.order_by(None).count()
+        items = q.offset((page - 1) * per_page).limit(per_page).all()
+        data = {
+            "tarjetas": _serialize_board_items(items, db, include_image=include_image),
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": (total + per_page - 1) // per_page if per_page else 0,
+                "has_next": page * per_page < total,
+                "has_prev": page > 1,
+            },
+            "view": "board",
+        }
+        return JSONResponse(content=data, headers=CACHE_HEADERS)
 
     try:
         if page is None and per_page is None:
@@ -209,7 +272,7 @@ def get_tarjetas(
 
     per_page = min(per_page or 50, 100)
     page = page or 1
-    total = q.count()
+    total = q.order_by(None).count()
     items = q.offset((page - 1) * per_page).limit(per_page).all()
     data = {
         "tarjetas": _enrich_batch(items, db, include_image=include_image),
@@ -223,6 +286,14 @@ def get_tarjetas(
         },
     }
     return JSONResponse(content=data, headers=CACHE_HEADERS)
+
+
+@router.get("/{id}")
+def get_tarjeta_by_id(id: int, db: Session = Depends(get_db)):
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    return _enrich_tarjeta(t, db, include_image=True)
 
 
 @router.post("", status_code=201)
@@ -440,6 +511,7 @@ async def update_tarjeta(
 # Mejora #1, #5: Batch position update para Drag & Drop
 @router.put("/batch/positions")
 async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depends(get_db)):
+    changed: list[dict] = []
     for item in data.items:
         t = db.query(RepairCard).filter(RepairCard.id == item.id).first()
         if t:
@@ -471,11 +543,12 @@ async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depend
                     t.para_entregar_date = datetime.now(timezone.utc)
                 elif item.columna == "listos" and not t.entregados_date:
                     t.entregados_date = datetime.now(timezone.utc)
+            changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
 
     db.commit()
     invalidate_stats()
     try:
-        await sio.emit("tarjetas_reordenadas", {})
+        await sio.emit("tarjetas_reordenadas", {"items": changed})
     except Exception:
         pass
     return {"ok": True}
@@ -545,3 +618,101 @@ def get_historial(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
     hist = db.query(StatusHistory).filter(StatusHistory.tarjeta_id == id).order_by(StatusHistory.changed_at.desc()).all()
     return [h.to_dict() for h in hist]
+
+
+# --- Blocked cards ---
+@router.patch("/{id}/block")
+async def block_tarjeta(id: int, body: dict, db: Session = Depends(get_db)):
+    """Bloquear o desbloquear una tarjeta."""
+    t = db.query(RepairCard).filter(RepairCard.id == id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+
+    blocked = body.get("blocked", True)
+    if blocked:
+        t.blocked_at = datetime.utcnow()
+        t.blocked_reason = body.get("reason", "")
+        t.blocked_by = body.get("user_id")
+    else:
+        t.blocked_at = None
+        t.blocked_reason = None
+        t.blocked_by = None
+
+    db.commit()
+    db.refresh(t)
+    result = _enrich_tarjeta(t, db)
+    try:
+        await sio.emit("tarjeta_actualizada", result)
+    except Exception:
+        pass
+    return result
+
+
+# --- Batch operations ---
+@router.post("/batch")
+async def batch_operations(body: dict, db: Session = Depends(get_db)):
+    """Operaciones en lote sobre múltiples tarjetas.
+
+    body: { ids: [1,2,3], action: "move"|"assign"|"tag"|"priority"|"delete",
+            value: "diagnosticada" | user_id | tag_id | "alta" }
+    """
+    ids = body.get("ids", [])
+    action = body.get("action")
+    value = body.get("value")
+
+    if not ids or not action:
+        raise HTTPException(status_code=400, detail="ids and action required")
+
+    cards = db.query(RepairCard).filter(RepairCard.id.in_(ids)).all()
+    if not cards:
+        raise HTTPException(status_code=404, detail="No cards found")
+
+    updated = []
+    for t in cards:
+        if action == "move" and value:
+            old_status = t.status
+            t.status = value
+            if value == "diagnosticada" and not t.diagnosticada_date:
+                t.diagnosticada_date = datetime.utcnow()
+            elif value == "para_entregar" and not t.para_entregar_date:
+                t.para_entregar_date = datetime.utcnow()
+            elif value == "listos" and not t.entregados_date:
+                t.entregados_date = datetime.utcnow()
+            db.add(StatusHistory(
+                tarjeta_id=t.id, old_status=old_status, new_status=value,
+                changed_by_name=body.get("user_name", "Batch"),
+            ))
+        elif action == "assign" and value is not None:
+            t.assigned_to = int(value) if value else None
+            t.assigned_name = body.get("assign_name", "")
+        elif action == "priority" and value:
+            t.priority = value
+        elif action == "delete":
+            t.deleted_at = datetime.utcnow()
+        elif action == "tag" and value is not None:
+            from sqlalchemy import select
+            existing = db.execute(
+                select(repair_card_tags.c.tag_id).where(
+                    repair_card_tags.c.repair_card_id == t.id,
+                    repair_card_tags.c.tag_id == int(value),
+                )
+            ).first()
+            if not existing:
+                db.execute(repair_card_tags.insert().values(
+                    repair_card_id=t.id, tag_id=int(value),
+                ))
+        updated.append(t.id)
+
+    db.commit()
+    invalidate_stats()
+
+    # Return updated cards
+    refreshed = db.query(RepairCard).filter(RepairCard.id.in_(updated)).all()
+    result = _enrich_batch(refreshed, db)
+    try:
+        for r in result:
+            await sio.emit("tarjeta_actualizada", r)
+    except Exception:
+        pass
+    return {"ok": True, "updated": len(updated), "tarjetas": result}
+

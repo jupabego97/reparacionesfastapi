@@ -1,7 +1,7 @@
 /** URL del backend. En producción (servicios separados) = VITE_API_URL. En dev con proxy = '' */
 export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
-export interface Tarjeta {
+export interface TarjetaBoardItem {
   id: number;
   nombre_propietario: string | null;
   problema: string | null;
@@ -29,7 +29,23 @@ export interface Tarjeta {
   subtasks_done: number;
   comments_count: number;
   dias_en_columna: number;
+  // Blocked
+  bloqueada?: boolean;
+  motivo_bloqueo?: string | null;
+  bloqueada_por?: number | null;
+  fecha_bloqueo?: string | null;
 }
+
+export interface TarjetaDetail extends TarjetaBoardItem {
+  fecha_inicio: string | null;
+  fecha_diagnosticada: string | null;
+  fecha_para_entregar: string | null;
+  fecha_entregada: string | null;
+  costo_final: number | null;
+  notas_costo: string | null;
+}
+
+export type Tarjeta = TarjetaBoardItem;
 
 export interface TarjetaCreate {
   nombre_propietario?: string;
@@ -121,6 +137,19 @@ export interface NotificationItem {
   created_at: string | null;
 }
 
+export interface TarjetasBoardResponse {
+  tarjetas: TarjetaBoardItem[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
+  view?: string;
+}
+
 // --- Helper para auth header ---
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('token');
@@ -175,6 +204,27 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
       headers: authHeaders(),
     });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async getTarjetasBoard(params?: { page?: number; per_page?: number; includeImageThumb?: boolean; search?: string; estado?: string; prioridad?: string; asignado_a?: number; cargador?: string; tag?: number }): Promise<TarjetasBoardResponse> {
+    const search = new URLSearchParams();
+    search.set('view', 'board');
+    if (params?.page != null) search.set('page', String(params.page));
+    if (params?.per_page != null) search.set('per_page', String(params.per_page));
+    if (params?.includeImageThumb) search.set('include', 'image_thumb');
+    if (params?.search) search.set('search', params.search);
+    if (params?.estado) search.set('estado', params.estado);
+    if (params?.prioridad) search.set('prioridad', params.prioridad);
+    if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
+    if (params?.cargador) search.set('cargador', params.cargador);
+    if (params?.tag != null) search.set('tag', String(params.tag));
+    const res = await fetch(`${API_BASE}/api/tarjetas?${search}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async getTarjetaById(id: number): Promise<TarjetaDetail> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { headers: authHeaders() });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -350,4 +400,97 @@ export const api = {
     if (!res.ok) throw new Error(await res.text())
     return res.blob()
   },
+
+  // --- Blocked cards ---
+  async blockTarjeta(id: number, reason: string, userId?: number): Promise<Tarjeta> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/block`, {
+      method: 'PATCH', headers: jsonHeaders(),
+      body: JSON.stringify({ blocked: true, reason, user_id: userId }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async unblockTarjeta(id: number): Promise<Tarjeta> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/block`, {
+      method: 'PATCH', headers: jsonHeaders(),
+      body: JSON.stringify({ blocked: false }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // --- Batch operations ---
+  async batchOperation(ids: number[], action: string, value?: string | number, extra?: Record<string, unknown>): Promise<{ ok: boolean; updated: number; tarjetas: Tarjeta[] }> {
+    const res = await fetch(`${API_BASE}/api/tarjetas/batch`, {
+      method: 'POST', headers: jsonHeaders(),
+      body: JSON.stringify({ ids, action, value, ...extra }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // --- Kanban metrics ---
+  async getKanbanMetrics(dias = 30): Promise<KanbanMetrics> {
+    const res = await fetch(`${API_BASE}/api/metricas/kanban?dias=${dias}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // --- Activity feed ---
+  async getActivityFeed(limit = 50, offset = 0, tarjetaId?: number): Promise<{ actividad: ActivityItem[]; total: number }> {
+    let url = `${API_BASE}/api/actividad?limit=${limit}&offset=${offset}`;
+    if (tarjetaId) url += `&tarjeta_id=${tarjetaId}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // --- Card templates ---
+  async getTemplates(): Promise<CardTemplateItem[]> {
+    const res = await fetch(`${API_BASE}/api/plantillas`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async createTemplate(data: Omit<CardTemplateItem, 'id' | 'created_at'>): Promise<CardTemplateItem> {
+    const res = await fetch(`${API_BASE}/api/plantillas`, {
+      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async deleteTemplate(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/plantillas/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+  },
 };
+
+// New interfaces
+export interface KanbanMetrics {
+  cycle_time: { promedio_dias: number; total_completadas: number; detalle: { id: number; nombre: string; dias: number }[] };
+  lead_time_por_etapa: Record<string, number>;
+  throughput_semanal: { semana: string; completadas: number }[];
+  cfd: Record<string, string | number>[];
+  sla_violations: { tarjeta_id: number; nombre: string; columna: string; horas_en_columna: number; sla_horas: number }[];
+  blocked_count: number;
+}
+
+export interface ActivityItem {
+  id: number;
+  tarjeta_id: number;
+  old_status: string | null;
+  new_status: string;
+  changed_at: string;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  nombre_propietario: string;
+}
+
+export interface CardTemplateItem {
+  id: number;
+  name: string;
+  problem_template: string | null;
+  default_priority: string;
+  default_notes: string | null;
+  estimated_hours: number | null;
+  created_at: string;
+}

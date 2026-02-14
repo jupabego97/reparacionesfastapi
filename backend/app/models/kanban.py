@@ -3,7 +3,7 @@
 Incluye: KanbanColumn, Tag, SubTask, Comment, Notification.
 """
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, Boolean, Float, ForeignKey, Table
+from sqlalchemy import Column, Integer, Text, DateTime, Boolean, Float, ForeignKey, Table, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -14,6 +14,7 @@ repair_card_tags = Table(
     Base.metadata,
     Column("repair_card_id", Integer, ForeignKey("repair_cards.id", ondelete="CASCADE"), primary_key=True),
     Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+    Index("ix_repair_card_tags_tag_card", "tag_id", "repair_card_id"),
 )
 
 
@@ -28,10 +29,13 @@ class KanbanColumn(Base):
     icon = Column(Text, nullable=True, default="fas fa-inbox")
     position = Column(Integer, nullable=False, default=0)
     wip_limit = Column(Integer, nullable=True)                    # WIP limit (null = sin límite)
-    is_done_column = Column(Boolean, nullable=False, default=False)  # Indica si es columna "completado"
+    is_done_column = Column(Boolean, nullable=False, default=False)
+    sla_hours = Column(Integer, nullable=True)                    # Alerta SLA (horas máx en esta columna)
+    required_fields = Column(Text, nullable=True)                 # JSON: campos requeridos para entrar
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
+        import json
         return {
             "id": self.id,
             "key": self.key,
@@ -41,6 +45,8 @@ class KanbanColumn(Base):
             "position": self.position,
             "wip_limit": self.wip_limit,
             "is_done_column": self.is_done_column,
+            "sla_hours": self.sla_hours,
+            "required_fields": json.loads(self.required_fields) if self.required_fields else [],
         }
 
 
@@ -130,5 +136,29 @@ class Notification(Base):
             "message": self.message,
             "type": self.type,
             "read": self.read,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
+
+
+class CardTemplate(Base):
+    """Plantillas reutilizables para crear tarjetas rápido."""
+    __tablename__ = "card_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False, unique=True)
+    problem_template = Column(Text, nullable=True)
+    default_priority = Column(Text, nullable=False, default="media")
+    default_notes = Column(Text, nullable=True)
+    estimated_hours = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "problem_template": self.problem_template,
+            "default_priority": self.default_priority,
+            "default_notes": self.default_notes,
+            "estimated_hours": self.estimated_hours,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }

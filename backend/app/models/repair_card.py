@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey, Float, Boolean
+from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey, Float, Index
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -7,6 +7,11 @@ from app.core.database import Base
 
 class RepairCard(Base):
     __tablename__ = "repair_cards"
+    __table_args__ = (
+        Index("ix_repair_cards_deleted_status_position", "deleted_at", "status", "position"),
+        Index("ix_repair_cards_deleted_assigned", "deleted_at", "assigned_to"),
+        Index("ix_repair_cards_deleted_priority", "deleted_at", "priority"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     owner_name = Column(Text, nullable=True, default="Cliente", index=True)
@@ -41,6 +46,11 @@ class RepairCard(Base):
     # --- Mejora #23: Soft delete ---
     deleted_at = Column(DateTime, nullable=True, index=True)
 
+    # --- Blocked cards ---
+    blocked_at = Column(DateTime, nullable=True)
+    blocked_reason = Column(Text, nullable=True)
+    blocked_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # --- Mejora #10: Tags (via relación M:N) ---
     # Se accede vía join, no relación directa para evitar imports circulares
 
@@ -67,6 +77,10 @@ class RepairCard(Base):
             "costo_final": self.final_cost,
             "notas_costo": self.cost_notes,
             "eliminado": self.deleted_at is not None,
+            "bloqueada": self.blocked_at is not None,
+            "motivo_bloqueo": self.blocked_reason,
+            "bloqueada_por": self.blocked_by,
+            "fecha_bloqueo": self.blocked_at.strftime("%Y-%m-%d %H:%M:%S") if self.blocked_at else None,
         }
         d["imagen_url"] = self.image_url if include_image else None
         return d
@@ -74,6 +88,9 @@ class RepairCard(Base):
 
 class StatusHistory(Base):
     __tablename__ = "status_history"
+    __table_args__ = (
+        Index("ix_status_history_changed_tarjeta", "changed_at", "tarjeta_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     tarjeta_id = Column(Integer, ForeignKey("repair_cards.id", ondelete="CASCADE"), nullable=False, index=True)

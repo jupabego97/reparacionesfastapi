@@ -36,7 +36,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
 
   const createMut = useMutation({
     mutationFn: (data: any) => api.createTarjeta(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); onClose(); },
     onError: (e: any) => setError(e.message || 'Error al crear'),
   });
 
