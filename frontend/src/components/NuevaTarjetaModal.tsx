@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, UserInfo } from '../api/client';
+import { getUiErrorFeedback } from '../utils/errorMessaging';
 
 interface Props {
   onClose: () => void;
@@ -37,7 +38,10 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   const createMut = useMutation({
     mutationFn: (data: any) => api.createTarjeta(data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas'] }); onClose(); },
-    onError: (e: any) => setError(e.message || 'Error al crear'),
+    onError: (e: unknown) => {
+      const feedback = getUiErrorFeedback(e, 'No se pudo crear la reparación.');
+      setError(`${feedback.message} ${feedback.actionLabel}.`);
+    },
   });
 
   useEffect(() => {
