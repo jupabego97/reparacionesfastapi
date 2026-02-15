@@ -78,7 +78,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   // Card-specific data — only fetch when the relevant tab is active
   const { data: subtasks = [], refetch: refetchSubtasks } = useQuery({
     queryKey: ['subtasks', tarjetaId], queryFn: () => api.getSubTasks(tarjetaId),
-    enabled: tab === 'subtasks' || tab === 'info',
+    enabled: tab === 'subtasks',
   });
   const { data: comments = [], refetch: refetchComments } = useQuery({
     queryKey: ['comments', tarjetaId], queryFn: () => api.getComments(tarjetaId),
@@ -90,7 +90,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   });
   const { data: media = [], refetch: refetchMedia } = useQuery<TarjetaMediaItem[]>({
     queryKey: ['media', tarjetaId], queryFn: () => api.getTarjetaMedia(tarjetaId),
-    enabled: tab === 'photos' || tab === 'info',
+    enabled: tab === 'photos',
   });
 
   const updateMut = useMutation({
