@@ -218,6 +218,9 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
     for item in data:
         problema = (item.get("problema") or "").strip()
         notas = (item.get("notas_tecnicas") or "").strip()
+        cover_thumb = item.get("cover_thumb_url")
+        if isinstance(cover_thumb, str) and cover_thumb.startswith("data:"):
+            cover_thumb = None
         compact.append({
             "id": item.get("id"),
             "nombre_propietario": item.get("nombre_propietario"),
@@ -238,9 +241,9 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
             "bloqueada": item.get("bloqueada"),
             "motivo_bloqueo": item.get("motivo_bloqueo"),
             "tags": item.get("tags", []),
-            "cover_thumb_url": item.get("cover_thumb_url"),
+            "cover_thumb_url": cover_thumb,
             "media_count": item.get("media_count", 0),
-            "imagen_url": item.get("cover_thumb_url") or item.get("imagen_url"),
+            "imagen_url": cover_thumb,
         })
     return compact
 
@@ -325,7 +328,7 @@ def get_tarjetas(
         if fast_mode:
             # Cursor pagination must use a deterministic order aligned with cursor field.
             # Clear inherited ordering (position/start_date) to avoid skipped/duplicated rows.
-            fast_q = q.order_by(None).order_by(RepairCard.id.asc())
+            fast_q = q.options(defer(RepairCard.image_url)).order_by(None).order_by(RepairCard.id.asc())
             cursor_id: int | None = None
             if cursor:
                 try:
@@ -341,7 +344,7 @@ def get_tarjetas(
             total = q.order_by(None).count() if include_totals else None
             pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
             data = {
-                "tarjetas": _serialize_board_items(items, db, include_image=include_image),
+                "tarjetas": _serialize_board_items(items, db, include_image=False),
                 "pagination": {
                     "page": None,
                     "per_page": per_page,
