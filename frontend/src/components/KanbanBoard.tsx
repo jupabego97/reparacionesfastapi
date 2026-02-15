@@ -256,22 +256,28 @@ export default function KanbanBoard({
     batchMutation.mutate(updates);
   }, [tarjetaById, tarjetasPorColumna, batchMutation]);
 
+  // Stable delete handler — avoids new function ref on each render
+  const handleDelete = useCallback((id: number) => deleteMutation.mutate(id), [deleteMutation]);
+
+  // Memoized selected set for O(1) lookup instead of Array.includes per card
+  const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds]);
+
   const renderCard = useCallback((t: TarjetaBoardItem, col: KanbanColumn) => (
     <SortableTarjetaCard
       key={t.id}
       tarjeta={t}
       columnas={columnas}
       onEdit={onEdit}
-      onDelete={(id: number) => deleteMutation.mutate(id)}
+      onDelete={handleDelete}
       onMove={handleMoveViaDrop}
       compact={compactView || col.is_done_column}
       selectable={selectable}
-      selected={selectedIds?.includes(t.id)}
+      selected={selectedSet.has(t.id)}
       onSelect={onSelect}
       onBlock={onBlock}
       onUnblock={onUnblock}
     />
-  ), [columnas, onEdit, deleteMutation, handleMoveViaDrop, compactView, selectable, selectedIds, onSelect, onBlock, onUnblock]);
+  ), [columnas, onEdit, handleDelete, handleMoveViaDrop, compactView, selectable, selectedSet, onSelect, onBlock, onUnblock]);
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter}

@@ -71,19 +71,26 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
     setSelectedTags(tarjeta.tags?.map(t => t.id) || []);
   }, [tarjeta]);
 
-  const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags });
-  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers });
+  // Global data — uses staleTime so App-level cache is reused (no redundant fetches)
+  const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags, staleTime: 5 * 60_000 });
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers, staleTime: 5 * 60_000 });
+
+  // Card-specific data — only fetch when the relevant tab is active
   const { data: subtasks = [], refetch: refetchSubtasks } = useQuery({
     queryKey: ['subtasks', tarjetaId], queryFn: () => api.getSubTasks(tarjetaId),
+    enabled: tab === 'subtasks' || tab === 'info',
   });
   const { data: comments = [], refetch: refetchComments } = useQuery({
     queryKey: ['comments', tarjetaId], queryFn: () => api.getComments(tarjetaId),
+    enabled: tab === 'comments',
   });
   const { data: historial = [] } = useQuery({
     queryKey: ['historial', tarjetaId], queryFn: () => api.getHistorial(tarjetaId),
+    enabled: tab === 'history',
   });
   const { data: media = [], refetch: refetchMedia } = useQuery<TarjetaMediaItem[]>({
     queryKey: ['media', tarjetaId], queryFn: () => api.getTarjetaMedia(tarjetaId),
+    enabled: tab === 'photos' || tab === 'info',
   });
 
   const updateMut = useMutation({

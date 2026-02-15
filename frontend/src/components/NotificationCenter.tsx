@@ -10,7 +10,8 @@ export default function NotificationCenter() {
     const { data } = useQuery({
         queryKey: ['notificaciones'],
         queryFn: () => api.getNotificaciones(),
-        refetchInterval: 30000,
+        refetchInterval: 60_000, // 60s — socket events trigger invalidation for real-time
+        staleTime: 30_000,
     });
 
     const markAllMut = useMutation({

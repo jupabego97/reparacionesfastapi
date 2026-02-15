@@ -1,153 +1,223 @@
-"""Métricas Kanban avanzadas: Cycle Time, Lead Time, Throughput, CFD."""
+"""Métricas Kanban avanzadas: Cycle Time, Lead Time, Throughput, CFD.
+
+Optimizado: queries batch en vez de O(N*M), cálculos en DB en vez de Python.
+"""
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case, and_, literal_column
 
 from app.core.database import get_db
+from app.core.cache import get_cached, set_cached
 from app.models.repair_card import RepairCard, StatusHistory
 
 router = APIRouter(prefix="/api/metricas", tags=["metricas"])
+
+METRICAS_CACHE_KEY = "metricas_kanban"
+METRICAS_TTL = 120  # 2 minutes
 
 
 @router.get("/kanban")
 def get_kanban_metrics(
     db: Session = Depends(get_db),
-    dias: int = Query(30, description="Días de histórico"),
+    dias: int = Query(30, description="Días de histórico", ge=1, le=365),
 ):
     """Retorna métricas avanzadas de Kanban."""
-    base = db.query(RepairCard).filter(RepairCard.deleted_at.is_(None))
-    now = datetime.utcnow()
+    cache_key = f"{METRICAS_CACHE_KEY}_{dias}"
+    cached = get_cached(cache_key, METRICAS_TTL)
+    if cached is not None:
+        return cached
+
+    now = datetime.now(timezone.utc)
     desde = now - timedelta(days=dias)
     dialect = db.get_bind().dialect.name
 
-    # --- 1. Cycle Time (ingresado → listos) ---
+    base = db.query(RepairCard).filter(RepairCard.deleted_at.is_(None))
+
+    # --- 1. Cycle Time (ingresado → listos) via DB aggregation ---
     if dialect == "sqlite":
         ct_expr = func.julianday(RepairCard.entregados_date) - func.julianday(RepairCard.ingresado_date)
     else:
         ct_expr = func.extract("epoch", RepairCard.entregados_date - RepairCard.ingresado_date) / 86400
 
-    completed = base.filter(
+    ct_filters = [
+        RepairCard.deleted_at.is_(None),
         RepairCard.entregados_date.isnot(None),
+        RepairCard.ingresado_date.isnot(None),
         RepairCard.entregados_date >= desde,
-    ).all()
+    ]
 
-    cycle_times = []
-    for c in completed:
-        if c.ingresado_date and c.entregados_date:
-            try:
-                days = (c.entregados_date - c.ingresado_date).days
-                cycle_times.append({"id": c.id, "nombre": c.owner_name, "dias": days})
-            except Exception:
-                pass
+    # Aggregated cycle time from DB
+    ct_stats = db.query(
+        func.avg(ct_expr).label("avg_days"),
+        func.count(RepairCard.id).label("total"),
+    ).filter(*ct_filters).first()
 
-    avg_cycle = round(sum(ct["dias"] for ct in cycle_times) / len(cycle_times), 1) if cycle_times else 0
+    avg_cycle = round(float(ct_stats.avg_days or 0), 1)
+    total_completed = ct_stats.total or 0
 
-    # --- 2. Lead Time por etapa ---
-    lead_stages = {
-        "ingresado_diagnosticada": [],
-        "diagnosticada_para_entregar": [],
-        "para_entregar_listos": [],
+    # Top 20 detail (only load what's needed)
+    cycle_detail = db.query(
+        RepairCard.id,
+        RepairCard.owner_name,
+        ct_expr.label("dias"),
+    ).filter(*ct_filters).order_by(ct_expr.desc()).limit(20).all()
+
+    cycle_times = [{"id": r.id, "nombre": r.owner_name, "dias": round(float(r.dias or 0), 1)} for r in cycle_detail]
+
+    # --- 2. Lead Time por etapa (DB aggregation) ---
+    if dialect == "sqlite":
+        lead_ing_diag = func.avg(func.julianday(RepairCard.diagnosticada_date) - func.julianday(RepairCard.ingresado_date))
+        lead_diag_ent = func.avg(func.julianday(RepairCard.para_entregar_date) - func.julianday(RepairCard.diagnosticada_date))
+        lead_ent_lis = func.avg(func.julianday(RepairCard.entregados_date) - func.julianday(RepairCard.para_entregar_date))
+    else:
+        lead_ing_diag = func.avg(func.extract("epoch", RepairCard.diagnosticada_date - RepairCard.ingresado_date) / 86400)
+        lead_diag_ent = func.avg(func.extract("epoch", RepairCard.para_entregar_date - RepairCard.diagnosticada_date) / 86400)
+        lead_ent_lis = func.avg(func.extract("epoch", RepairCard.entregados_date - RepairCard.para_entregar_date) / 86400)
+
+    lead_row = db.query(
+        lead_ing_diag.label("ing_diag"),
+        lead_diag_ent.label("diag_ent"),
+        lead_ent_lis.label("ent_lis"),
+    ).filter(*ct_filters).first()
+
+    avg_leads = {
+        "ingresado_diagnosticada": round(float(lead_row.ing_diag or 0), 1),
+        "diagnosticada_para_entregar": round(float(lead_row.diag_ent or 0), 1),
+        "para_entregar_listos": round(float(lead_row.ent_lis or 0), 1),
     }
-    for c in completed:
-        try:
-            if c.ingresado_date and c.diagnosticada_date:
-                lead_stages["ingresado_diagnosticada"].append((c.diagnosticada_date - c.ingresado_date).days)
-            if c.diagnosticada_date and c.para_entregar_date:
-                lead_stages["diagnosticada_para_entregar"].append((c.para_entregar_date - c.diagnosticada_date).days)
-            if c.para_entregar_date and c.entregados_date:
-                lead_stages["para_entregar_listos"].append((c.entregados_date - c.para_entregar_date).days)
-        except Exception:
-            pass
 
-    avg_leads = {}
-    for k, v in lead_stages.items():
-        avg_leads[k] = round(sum(v) / len(v), 1) if v else 0
-
-    # --- 3. Throughput semanal (últimas N semanas) ---
+    # --- 3. Throughput semanal (single query with GROUP BY) ---
     semanas = max(dias // 7, 4)
-    throughput = []
-    for i in range(semanas):
-        week_end = now - timedelta(weeks=i)
-        week_start = week_end - timedelta(weeks=1)
-        cnt = base.filter(
-            RepairCard.entregados_date.isnot(None),
-            RepairCard.entregados_date >= week_start,
-            RepairCard.entregados_date < week_end,
-        ).count()
-        throughput.append({
-            "semana": week_start.strftime("%d/%m"),
-            "completadas": cnt,
-        })
-    throughput.reverse()
+    since_weeks = now - timedelta(weeks=semanas)
 
-    # --- 4. Cumulative Flow Diagram (CFD) data (últimos N días, muestreo diario) ---
+    if dialect == "sqlite":
+        week_expr = func.strftime("%Y-%W", RepairCard.entregados_date)
+    else:
+        week_expr = func.date_trunc("week", RepairCard.entregados_date)
+
+    tp_rows = db.query(
+        week_expr.label("semana"),
+        func.count(RepairCard.id).label("completadas"),
+    ).filter(
+        RepairCard.deleted_at.is_(None),
+        RepairCard.entregados_date.isnot(None),
+        RepairCard.entregados_date >= since_weeks,
+    ).group_by(week_expr).order_by(week_expr).all()
+
+    throughput = []
+    for row in tp_rows:
+        week_label = row.semana
+        if hasattr(week_label, "strftime"):
+            week_label = week_label.strftime("%d/%m")
+        elif isinstance(week_label, str) and len(week_label) > 5:
+            week_label = week_label[-5:]
+        throughput.append({"semana": str(week_label), "completadas": row.completadas})
+
+    # --- 4. CFD: Single query using current counts per status ---
     statuses = ["ingresado", "diagnosticada", "para_entregar", "listos"]
-    cfd_data = []
+
+    # Current state snapshot (fast, 1 query)
+    current_counts = db.query(
+        RepairCard.status,
+        func.count(RepairCard.id),
+    ).filter(RepairCard.deleted_at.is_(None)).group_by(RepairCard.status).all()
+    current_map = dict(current_counts)
+
+    # Historical CFD: batch query grouping StatusHistory by date + status
     sample_days = min(dias, 60)
     step = max(1, sample_days // 30)
+    cfd_since = now - timedelta(days=sample_days)
 
-    for i in range(0, sample_days, step):
-        day = now - timedelta(days=sample_days - i)
-        point = {"fecha": day.strftime("%d/%m")}
-        for status in statuses:
-            # Count cards that were in this status at this point in time
-            # Use StatusHistory to find historical state
-            cnt = db.query(func.count(StatusHistory.id)).filter(
-                StatusHistory.new_status == status,
-                StatusHistory.changed_at <= day,
-            ).scalar() or 0
-            point[status] = cnt
-        cfd_data.append(point)
+    if dialect == "sqlite":
+        day_expr = func.strftime("%Y-%m-%d", StatusHistory.changed_at)
+    else:
+        day_expr = func.date_trunc("day", StatusHistory.changed_at)
 
-    # Also add current state as last point
+    # Get transition counts grouped by day and new_status (1 query instead of 240)
+    cfd_rows = db.query(
+        day_expr.label("dia"),
+        StatusHistory.new_status,
+        func.count(StatusHistory.id).label("cnt"),
+    ).filter(
+        StatusHistory.changed_at >= cfd_since,
+        StatusHistory.new_status.in_(statuses),
+    ).group_by(day_expr, StatusHistory.new_status).order_by(day_expr).all()
+
+    # Build cumulative flow from transition counts
+    cfd_by_day: dict[str, dict[str, int]] = {}
+    for row in cfd_rows:
+        day_str = row.dia
+        if hasattr(day_str, "strftime"):
+            day_str = day_str.strftime("%d/%m")
+        elif isinstance(day_str, str) and len(day_str) >= 10:
+            day_str = f"{day_str[8:10]}/{day_str[5:7]}"
+        if day_str not in cfd_by_day:
+            cfd_by_day[day_str] = {s: 0 for s in statuses}
+        cfd_by_day[day_str][row.new_status] = row.cnt
+
+    cfd_data = [{"fecha": day, **counts} for day, counts in cfd_by_day.items()]
+
+    # Add current point
     current_point = {"fecha": now.strftime("%d/%m")}
     for status in statuses:
-        current_point[status] = base.filter(RepairCard.status == status).count()
+        current_point[status] = current_map.get(status, 0)
     cfd_data.append(current_point)
 
-    # --- 5. SLA violations ---
+    # --- 5. SLA violations (batch query) ---
     from app.models.kanban import KanbanColumn
     columns = db.query(KanbanColumn).filter(KanbanColumn.sla_hours.isnot(None)).all()
+
     sla_violations = []
-    for col in columns:
-        if not col.sla_hours:
-            continue
-        # Find cards in this column exceeding SLA
-        date_field = {
+    if columns:
+        date_field_map = {
             "ingresado": RepairCard.ingresado_date,
             "diagnosticada": RepairCard.diagnosticada_date,
             "para_entregar": RepairCard.para_entregar_date,
-        }.get(col.key)
-        if date_field is None:
-            continue
-        threshold = now - timedelta(hours=col.sla_hours)
-        violating = base.filter(
-            RepairCard.status == col.key,
-            date_field.isnot(None),
-            date_field < threshold,
-        ).all()
-        for v in violating:
-            try:
-                hours_in = int((now - getattr(v, date_field.key)).total_seconds() / 3600)
-            except Exception:
-                hours_in = 0
-            sla_violations.append({
-                "tarjeta_id": v.id,
-                "nombre": v.owner_name,
-                "columna": col.title,
-                "horas_en_columna": hours_in,
-                "sla_horas": col.sla_hours,
-            })
+        }
+
+        for col in columns:
+            if not col.sla_hours:
+                continue
+            date_field = date_field_map.get(col.key)
+            if date_field is None:
+                continue
+            threshold = now - timedelta(hours=col.sla_hours)
+
+            # Single query per SLA column with DB-side hour calculation
+            if dialect == "sqlite":
+                hours_expr = (func.julianday("now") - func.julianday(date_field)) * 24
+            else:
+                hours_expr = func.extract("epoch", func.now() - date_field) / 3600
+
+            violators = db.query(
+                RepairCard.id,
+                RepairCard.owner_name,
+                hours_expr.label("hours_in"),
+            ).filter(
+                RepairCard.deleted_at.is_(None),
+                RepairCard.status == col.key,
+                date_field.isnot(None),
+                date_field < threshold,
+            ).all()
+
+            for v in violators:
+                sla_violations.append({
+                    "tarjeta_id": v.id,
+                    "nombre": v.owner_name,
+                    "columna": col.title,
+                    "horas_en_columna": round(float(v.hours_in or 0)),
+                    "sla_horas": col.sla_hours,
+                })
 
     # --- 6. Blocked cards count ---
     blocked_count = base.filter(RepairCard.blocked_at.isnot(None)).count()
 
-    return {
+    result = {
         "cycle_time": {
             "promedio_dias": avg_cycle,
-            "total_completadas": len(cycle_times),
-            "detalle": cycle_times[:20],
+            "total_completadas": total_completed,
+            "detalle": cycle_times,
         },
         "lead_time_por_etapa": avg_leads,
         "throughput_semanal": throughput,
@@ -155,3 +225,6 @@ def get_kanban_metrics(
         "sla_violations": sla_violations,
         "blocked_count": blocked_count,
     }
+
+    set_cached(cache_key, result, METRICAS_TTL)
+    return result

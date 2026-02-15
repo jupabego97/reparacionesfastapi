@@ -372,6 +372,17 @@ def get_tarjeta_by_id(id: int, db: Session = Depends(get_db)):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    # Use batch enrichment for consistent O(1) queries
+    enriched = _enrich_batch([t], db, include_image=True)
+    if enriched:
+        result = enriched[0]
+        # Expand media preview for detail view (up to 6 instead of board's 3)
+        media_rows = _media_rows_for_card(db, t.id)
+        result["media_preview"] = [
+            {"id": m.id, "url": m.url, "thumb_url": m.thumb_url or m.url, "position": m.position, "is_cover": m.is_cover}
+            for m in media_rows[:6]
+        ]
+        return result
     return _enrich_tarjeta(t, db, include_image=True)
 
 
@@ -588,9 +599,16 @@ async def batch_update_positions(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Batch-load all cards in one query instead of O(N) queries
+    item_ids = [item.id for item in data.items]
+    cards_by_id = {
+        t.id: t
+        for t in db.query(RepairCard).filter(RepairCard.id.in_(item_ids)).all()
+    }
+
     changed: list[dict] = []
     for item in data.items:
-        t = db.query(RepairCard).filter(RepairCard.id == item.id).first()
+        t = cards_by_id.get(item.id)
         if t:
             old_status = t.status
             t.position = item.posicion
