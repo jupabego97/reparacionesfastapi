@@ -1,6 +1,13 @@
 from datetime import date
-from typing import Optional, List
+from enum import Enum
+from typing import Optional
 from pydantic import BaseModel, Field
+
+
+class Prioridad(str, Enum):
+    alta = "alta"
+    media = "media"
+    baja = "baja"
 
 
 class TarjetaCreate(BaseModel):
@@ -11,11 +18,10 @@ class TarjetaCreate(BaseModel):
     imagen_url: Optional[str] = None
     tiene_cargador: Optional[str] = "si"
     notas_tecnicas: Optional[str] = None
-    # Nuevos campos
-    prioridad: Optional[str] = "media"
+    prioridad: Optional[Prioridad] = Prioridad.media
     asignado_a: Optional[int] = None
-    costo_estimado: Optional[float] = None
-    tags: Optional[List[int]] = None
+    costo_estimado: Optional[float] = Field(None, ge=0)
+    tags: Optional[list[int]] = None
 
 
 class TarjetaUpdate(BaseModel):
@@ -27,14 +33,13 @@ class TarjetaUpdate(BaseModel):
     tiene_cargador: Optional[str] = None
     notas_tecnicas: Optional[str] = None
     columna: Optional[str] = None
-    # Nuevos campos
-    prioridad: Optional[str] = None
+    prioridad: Optional[Prioridad] = None
     posicion: Optional[int] = None
     asignado_a: Optional[int] = None
-    costo_estimado: Optional[float] = None
-    costo_final: Optional[float] = None
+    costo_estimado: Optional[float] = Field(None, ge=0)
+    costo_final: Optional[float] = Field(None, ge=0)
     notas_costo: Optional[str] = None
-    tags: Optional[List[int]] = None
+    tags: Optional[list[int]] = None
 
 
 class TarjetaResponse(BaseModel):
@@ -51,7 +56,6 @@ class TarjetaResponse(BaseModel):
     fecha_entregada: Optional[str] = None
     notas_tecnicas: Optional[str] = None
     imagen_url: Optional[str] = None
-    # Nuevos campos
     prioridad: Optional[str] = "media"
     posicion: Optional[int] = 0
     asignado_a: Optional[int] = None
@@ -60,13 +64,17 @@ class TarjetaResponse(BaseModel):
     costo_final: Optional[float] = None
     notas_costo: Optional[str] = None
     eliminado: Optional[bool] = False
-    tags: Optional[List[dict]] = None
-    subtasks: Optional[List[dict]] = None
+    bloqueada: Optional[bool] = False
+    motivo_bloqueo: Optional[str] = None
+    tags: Optional[list[dict]] = None
+    subtasks_total: Optional[int] = 0
+    subtasks_done: Optional[int] = 0
     comments_count: Optional[int] = 0
     cover_thumb_url: Optional[str] = None
     media_count: Optional[int] = 0
     has_media: Optional[bool] = False
-    media_preview: Optional[List[dict]] = None
+    media_preview: Optional[list[dict]] = None
+    dias_en_columna: Optional[int] = 0
 
 
 class HistorialEntry(BaseModel):
@@ -83,13 +91,47 @@ class HistorialEntry(BaseModel):
 class PosicionUpdate(BaseModel):
     id: int
     columna: str
-    posicion: int
+    posicion: int = Field(ge=0)
 
 
 class BatchPosicionUpdate(BaseModel):
-    items: List[PosicionUpdate]
+    items: list[PosicionUpdate] = Field(min_length=1)
 
 
 # --- Soft delete / restore ---
 class TarjetaRestore(BaseModel):
     id: int
+
+
+# --- Block / Unblock ---
+class BlockRequest(BaseModel):
+    blocked: bool = True
+    reason: Optional[str] = Field(None, max_length=500)
+    user_id: Optional[int] = None
+
+
+# --- Batch operations ---
+class BatchAction(str, Enum):
+    move = "move"
+    assign = "assign"
+    tag = "tag"
+    priority = "priority"
+    delete = "delete"
+
+
+class BatchOperationRequest(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    action: BatchAction
+    value: Optional[str] = None
+    user_name: Optional[str] = None
+    assign_name: Optional[str] = None
+
+
+# --- Media reorder ---
+class MediaReorderItem(BaseModel):
+    id: int
+    position: int = Field(ge=0)
+
+
+class MediaReorderRequest(BaseModel):
+    items: list[MediaReorderItem] = Field(min_length=1)
