@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { UserInfo, Tag } from '../api/client';
 
 interface Filtros {
@@ -19,8 +20,10 @@ interface Props {
 }
 
 export default function BusquedaFiltros({ filtros, onChange, totalResults, users, tags, columnas }: Props) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const set = (key: keyof Filtros, val: string) => onChange({ ...filtros, [key]: val });
   const hasFilters = filtros.search || filtros.estado || filtros.prioridad || filtros.asignado_a || filtros.cargador || filtros.tag;
+  const activeFilterCount = [filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag].filter(Boolean).length;
 
   return (
     <div className="filtros-bar">
@@ -41,35 +44,47 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
           )}
         </div>
 
-        <select className="filter-select" value={filtros.estado} onChange={e => set('estado', e.target.value)} aria-label="Filtrar por estado">
-          <option value="">Todos los estados</option>
-          {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
-        </select>
+        <button
+          className="filters-toggle-btn"
+          onClick={() => setFiltersOpen(o => !o)}
+          aria-expanded={filtersOpen}
+          aria-label={filtersOpen ? 'Ocultar filtros' : 'Mostrar filtros'}
+        >
+          <i className="fas fa-sliders-h"></i>
+          {activeFilterCount > 0 && <span className="filter-badge">{activeFilterCount}</span>}
+        </button>
 
-        <select className="filter-select" value={filtros.prioridad} onChange={e => set('prioridad', e.target.value)} aria-label="Filtrar por prioridad">
-          <option value="">Toda prioridad</option>
-          <option value="alta">Alta</option>
-          <option value="media">Media</option>
-          <option value="baja">Baja</option>
-        </select>
-
-        <select className="filter-select" value={filtros.asignado_a} onChange={e => set('asignado_a', e.target.value)} aria-label="Filtrar por tecnico">
-          <option value="">Todos los tecnicos</option>
-          {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-        </select>
-
-        {tags.length > 0 && (
-          <select className="filter-select" value={filtros.tag} onChange={e => set('tag', e.target.value)} aria-label="Filtrar por etiqueta">
-            <option value="">Todas las etiquetas</option>
-            {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        <div className={`filters-collapsible ${filtersOpen ? 'open' : ''}`}>
+          <select className="filter-select" value={filtros.estado} onChange={e => set('estado', e.target.value)} aria-label="Filtrar por estado">
+            <option value="">Todos los estados</option>
+            {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
           </select>
-        )}
 
-        <select className="filter-select" value={filtros.cargador} onChange={e => set('cargador', e.target.value)} aria-label="Filtrar por cargador">
-          <option value="">Cargador</option>
-          <option value="si">Con cargador</option>
-          <option value="no">Sin cargador</option>
-        </select>
+          <select className="filter-select" value={filtros.prioridad} onChange={e => set('prioridad', e.target.value)} aria-label="Filtrar por prioridad">
+            <option value="">Toda prioridad</option>
+            <option value="alta">Alta</option>
+            <option value="media">Media</option>
+            <option value="baja">Baja</option>
+          </select>
+
+          <select className="filter-select" value={filtros.asignado_a} onChange={e => set('asignado_a', e.target.value)} aria-label="Filtrar por tecnico">
+            <option value="">Todos los tecnicos</option>
+            {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+          </select>
+
+          {tags.length > 0 && (
+            <select className="filter-select" value={filtros.tag} onChange={e => set('tag', e.target.value)} aria-label="Filtrar por etiqueta">
+              <option value="">Todas las etiquetas</option>
+              {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+
+          <select className="filter-select" value={filtros.cargador} onChange={e => set('cargador', e.target.value)} aria-label="Filtrar por cargador">
+            <option value="">Cargador</option>
+            <option value="si">Con cargador</option>
+            <option value="no">Sin cargador</option>
+          </select>
+        </div>
       </div>
 
       {(hasFilters || totalResults !== undefined) && (

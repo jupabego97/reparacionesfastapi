@@ -163,6 +163,7 @@ export default function App() {
       tag: filtros.tag ? Number(filtros.tag) : undefined,
     }),
     refetchOnWindowFocus: false,
+    staleTime: 30_000, // 30s — socket events keep data fresh between refetches
     enabled: isAuthenticated,
   });
 
@@ -205,18 +206,21 @@ export default function App() {
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],
     queryFn: api.getColumnas,
+    staleTime: 5 * 60_000, // 5 min — columns rarely change
     enabled: isAuthenticated,
   });
 
   const { data: allTags = [] } = useQuery<Tag[]>({
     queryKey: ['tags'],
     queryFn: api.getTags,
+    staleTime: 5 * 60_000, // 5 min — tags rarely change
     enabled: isAuthenticated,
   });
 
   const { data: users = [] } = useQuery<UserInfo[]>({
     queryKey: ['users'],
     queryFn: api.getUsers,
+    staleTime: 5 * 60_000, // 5 min — users rarely change
     enabled: isAuthenticated,
   });
 
