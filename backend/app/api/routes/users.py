@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -15,11 +16,19 @@ def _default_preferences() -> UserPreferences:
     return UserPreferences()
 
 
+def _ensure_user_preferences_table(db: Session) -> None:
+    # Hardening for environments where migrations have not run yet.
+    inspector = inspect(db.bind)
+    if not inspector.has_table(UserPreference.__tablename__):
+        UserPreference.__table__.create(bind=db.bind, checkfirst=True)
+
+
 @router.get('/me/preferences')
 def get_my_preferences(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _ensure_user_preferences_table(db)
     row = db.query(UserPreference).filter(UserPreference.user_id == user.id).first()
     raw = row.preferences_json if row else '{}'
     try:
@@ -36,6 +45,7 @@ def update_my_preferences(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _ensure_user_preferences_table(db)
     base = _default_preferences().model_dump()
     merged = {**base, **data.model_dump()}
 

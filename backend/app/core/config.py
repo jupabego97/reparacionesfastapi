@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -28,12 +29,15 @@ class Settings(BaseSettings):
     enable_prometheus_metrics: bool = True
 
     # --- S3 storage (Mejora #22) ---
-    s3_bucket: str = ""
-    s3_region: str = "us-east-1"
-    s3_access_key: str = ""
-    s3_secret_key: str = ""
-    s3_endpoint_url: str = ""  # Para Cloudflare R2 u otros S3-compatible
-    use_s3_storage: bool = False
+    s3_bucket: str = Field(default="", validation_alias=AliasChoices("S3_BUCKET", "R2_BUCKET"))
+    s3_region: str = Field(default="auto", validation_alias=AliasChoices("S3_REGION", "R2_REGION"))
+    s3_access_key: str = Field(default="", validation_alias=AliasChoices("S3_ACCESS_KEY", "R2_ACCESS_KEY"))
+    s3_secret_key: str = Field(default="", validation_alias=AliasChoices("S3_SECRET_KEY", "R2_SECRET_KEY"))
+    s3_endpoint_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("S3_ENDPOINT_URL", "R2_ENDPOINT_URL"),
+    )  # Para Cloudflare R2 u otros S3-compatible
+    use_s3_storage: bool = Field(default=False, validation_alias=AliasChoices("USE_S3_STORAGE", "R2_ENABLED"))
     media_v2_read_write: bool = True
 
     class Config:
