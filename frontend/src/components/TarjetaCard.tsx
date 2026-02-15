@@ -43,6 +43,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
     ? `https://wa.me/${whatsNum}?text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim())}`
     : null;
   const isBlocked = !!t.bloqueada;
+  const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
 
   if (compact) {
     return (
@@ -114,13 +115,15 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
       </div>
 
       {(t.problema_resumen || t.problema) && (t.problema || t.problema_resumen) !== 'Sin descripcion' && (
-        <p className="tarjeta-problem">{t.problema_resumen || (t.problema!.length > 80 ? t.problema!.slice(0, 80) + '...' : t.problema)}</p>
+        <p className="tarjeta-problem" aria-label="Problema reportado">
+          <strong>Problema:</strong> {t.problema_resumen || (t.problema!.length > 80 ? t.problema!.slice(0, 80) + '...' : t.problema)}
+        </p>
       )}
 
-      {t.notas_tecnicas && (
-        <div className="tarjeta-notas-tecnicas">
+      {notaTecnica && (
+        <div className="tarjeta-notas-tecnicas" aria-label="Notas técnicas">
           <i className="fas fa-wrench"></i>
-          <span>{t.notas_tecnicas.length > 100 ? t.notas_tecnicas.slice(0, 100) + '...' : t.notas_tecnicas}</span>
+          <span><strong>Notas técnicas:</strong> {notaTecnica}</span>
         </div>
       )}
 

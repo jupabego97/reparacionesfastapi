@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.models.user import User
+from app.services.auth_service import require_role
 from app.services.gemini_service import get_gemini_service
+from app.services.storage_service import get_storage_service
 
 router = APIRouter(tags=["health"])
 
@@ -47,15 +50,68 @@ def liveness():
 
 @router.get("/health/ready")
 def readiness(db: Session = Depends(get_db)):
+    services: dict[str, str] = {}
     try:
         db.scalar(text("SELECT 1"))
-        return {"status": "ready", "timestamp": datetime.now(UTC).isoformat()}
+        services["database"] = "ready"
     except Exception as e:
         logger.error(f"Readiness DB failure: {e}")
+        services["database"] = "not_ready"
         return JSONResponse(
             status_code=503,
-            content={"status": "not_ready", "timestamp": datetime.now(UTC).isoformat()},
+            content={"status": "not_ready", "timestamp": datetime.now(UTC).isoformat(), "services": services},
         )
+
+    try:
+        settings = get_settings()
+        if settings.use_s3_storage:
+            storage = get_storage_service()
+            if storage.use_s3 and getattr(storage, "_client", None):
+                services["storage"] = "ready"
+            else:
+                services["storage"] = "not_ready"
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "not_ready", "timestamp": datetime.now(UTC).isoformat(), "services": services},
+                )
+        else:
+            services["storage"] = "disabled"
+    except Exception as e:
+        logger.error(f"Readiness storage failure: {e}")
+        services["storage"] = "not_ready"
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "timestamp": datetime.now(UTC).isoformat(), "services": services},
+        )
+
+    return {"status": "ready", "timestamp": datetime.now(UTC).isoformat(), "services": services}
+
+
+@router.post("/health/storage/smoke")
+def storage_smoke(
+    admin: User = Depends(require_role("admin")),
+):
+    settings = get_settings()
+    if not settings.use_s3_storage:
+        raise HTTPException(status_code=400, detail="Storage remoto deshabilitado")
+    storage = get_storage_service()
+    if not storage.use_s3 or not getattr(storage, "_client", None):
+        raise HTTPException(status_code=503, detail="Storage remoto no disponible")
+
+    key = f"healthchecks/smoke-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.txt"
+    body = f"smoke-by:{admin.username}".encode("utf-8")
+    started = datetime.now(UTC)
+    storage._client.put_object(Bucket=storage._bucket, Key=key, Body=body, ContentType="text/plain")
+    storage._client.head_object(Bucket=storage._bucket, Key=key)
+    storage._client.delete_object(Bucket=storage._bucket, Key=key)
+    elapsed_ms = (datetime.now(UTC) - started).total_seconds() * 1000
+    return {
+        "status": "ok",
+        "storage": "R2",
+        "bucket": storage._bucket,
+        "key": key,
+        "latency_ms": round(elapsed_ms, 2),
+    }
 
 
 @router.get("/debug/schema")

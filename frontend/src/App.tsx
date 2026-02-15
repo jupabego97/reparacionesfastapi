@@ -100,7 +100,7 @@ function applyReorderPatch(data: BoardInfiniteData | undefined, items: ReorderIt
 }
 
 async function fetchBoardCards(params: {
-  page?: number;
+  cursor?: string;
   search?: string;
   estado?: string;
   prioridad?: string;
@@ -110,7 +110,7 @@ async function fetchBoardCards(params: {
 }): Promise<TarjetasBoardResponse> {
   return api.getTarjetasBoard({
     ...params,
-    page: params.page ?? 1,
+    mode: 'fast',
     per_page: 120,
     includeImageThumb: true,
   });
@@ -181,10 +181,10 @@ export default function App() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfiniteQuery<TarjetasBoardResponse, Error, BoardInfiniteData, typeof boardQueryKey, number>({
+  } = useInfiniteQuery<TarjetasBoardResponse, Error, BoardInfiniteData, typeof boardQueryKey, string | undefined>({
     queryKey: boardQueryKey,
     queryFn: ({ pageParam }) => fetchBoardCards({
-      page: pageParam,
+      cursor: pageParam,
       search: debouncedSearch || undefined,
       estado: filtros.estado || undefined,
       prioridad: filtros.prioridad || undefined,
@@ -192,8 +192,8 @@ export default function App() {
       cargador: filtros.cargador || undefined,
       tag: filtros.tag ? Number(filtros.tag) : undefined,
     }),
-    initialPageParam: 1,
-    getNextPageParam: lastPage => lastPage.pagination?.has_next ? (lastPage.pagination.page + 1) : undefined,
+    initialPageParam: undefined,
+    getNextPageParam: lastPage => lastPage.next_cursor ?? undefined,
     refetchOnWindowFocus: false,
     staleTime: 30_000, // 30s — socket events keep data fresh between refetches
     enabled: isAuthenticated,

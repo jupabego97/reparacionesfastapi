@@ -13,7 +13,8 @@ export interface TarjetaBoardItem {
   fecha_diagnosticada: string | null;
   fecha_para_entregar: string | null;
   fecha_entregada: string | null;
-  notas_tecnicas: string | null;
+  notas_tecnicas?: string | null;
+  notas_tecnicas_resumen?: string | null;
   imagen_url: string | null;
   cover_thumb_url?: string | null;
   media_count?: number;
@@ -23,10 +24,10 @@ export interface TarjetaBoardItem {
   posicion: number;
   asignado_a: number | null;
   asignado_nombre: string | null;
-  costo_estimado: number | null;
-  costo_final: number | null;
-  notas_costo: string | null;
-  eliminado: boolean;
+  costo_estimado?: number | null;
+  costo_final?: number | null;
+  notas_costo?: string | null;
+  eliminado?: boolean;
   tags: Tag[];
   subtasks_total: number;
   subtasks_done: number;
@@ -185,13 +186,15 @@ export interface TimelineEvent {
 export interface TarjetasBoardResponse {
   tarjetas: TarjetaBoardItem[];
   pagination: {
-    page: number;
+    page: number | null;
     per_page: number;
-    total: number;
-    pages: number;
+    total: number | null;
+    pages: number | null;
     has_next: boolean;
     has_prev: boolean;
   };
+  next_cursor?: string | null;
+  mode?: string;
   view?: string;
 }
 
@@ -330,12 +333,30 @@ export const api = {
     await ensureOk(res);
     return res.json();
   },
-  async getTarjetasBoard(params?: { page?: number; per_page?: number; includeImageThumb?: boolean; search?: string; estado?: string; prioridad?: string; asignado_a?: number; cargador?: string; tag?: number }): Promise<TarjetasBoardResponse> {
+  async getTarjetasBoard(params?: {
+    page?: number;
+    per_page?: number;
+    mode?: 'fast';
+    cursor?: string;
+    includeTotals?: boolean;
+    includeImageThumb?: boolean;
+    search?: string;
+    estado?: string;
+    prioridad?: string;
+    asignado_a?: number;
+    cargador?: string;
+    tag?: number
+  }): Promise<TarjetasBoardResponse> {
     const search = new URLSearchParams();
     search.set('view', 'board');
+    if (params?.mode) search.set('mode', params.mode);
     if (params?.page != null) search.set('page', String(params.page));
+    if (params?.cursor) search.set('cursor', params.cursor);
     if (params?.per_page != null) search.set('per_page', String(params.per_page));
-    if (params?.includeImageThumb) search.set('include', 'image_thumb');
+    const includeOpts: string[] = [];
+    if (params?.includeImageThumb) includeOpts.push('image_thumb');
+    if (params?.includeTotals) includeOpts.push('totals');
+    if (includeOpts.length) search.set('include', includeOpts.join(','));
     if (params?.search) search.set('search', params.search);
     if (params?.estado) search.set('estado', params.estado);
     if (params?.prioridad) search.set('prioridad', params.prioridad);

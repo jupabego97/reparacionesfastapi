@@ -3,6 +3,7 @@
 Mejoras integradas: prioridad, posición, asignación, notificaciones,
 costos, búsqueda server-side, S3 storage, soft delete, SQLite compat.
 """
+import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -216,6 +217,7 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
     compact: list[dict] = []
     for item in data:
         problema = (item.get("problema") or "").strip()
+        notas = (item.get("notas_tecnicas") or "").strip()
         compact.append({
             "id": item.get("id"),
             "nombre_propietario": item.get("nombre_propietario"),
@@ -228,6 +230,7 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
             "whatsapp": item.get("whatsapp"),
             "fecha_limite": item.get("fecha_limite"),
             "tiene_cargador": item.get("tiene_cargador"),
+            "notas_tecnicas_resumen": (notas[:120] + "...") if len(notas) > 120 else notas,
             "dias_en_columna": item.get("dias_en_columna", 0),
             "subtasks_total": item.get("subtasks_total", 0),
             "subtasks_done": item.get("subtasks_done", 0),
@@ -262,6 +265,8 @@ def get_tarjetas(
     cargador: str | None = Query(None),
     include_deleted: bool = Query(False),
     view: str | None = Query(None),
+    mode: str | None = Query(None),
+    cursor: str | None = Query(None),
     include: str | None = Query(None),
 ):
     include_image = light != 1
@@ -314,19 +319,54 @@ def get_tarjetas(
 
     if board_mode:
         per_page = min(per_page or 120, 200)
+        include_totals = "totals" in include_opts
+        fast_mode = (mode or "").lower() == "fast"
+
+        if fast_mode:
+            fast_q = q.order_by(RepairCard.id.asc())
+            cursor_id: int | None = None
+            if cursor:
+                try:
+                    cursor_id = int(cursor)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Cursor invalido")
+                fast_q = fast_q.filter(RepairCard.id > cursor_id)
+
+            page_items = fast_q.limit(per_page + 1).all()
+            has_next = len(page_items) > per_page
+            items = page_items[:per_page]
+            next_cursor = str(items[-1].id) if has_next and items else None
+            total = q.order_by(None).count() if include_totals else None
+            pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
+            data = {
+                "tarjetas": _serialize_board_items(items, db, include_image=include_image),
+                "pagination": {
+                    "page": None,
+                    "per_page": per_page,
+                    "total": total,
+                    "pages": pages,
+                    "has_next": has_next,
+                    "has_prev": cursor_id is not None,
+                },
+                "next_cursor": next_cursor,
+                "view": "board",
+                "mode": "fast",
+            }
+            return JSONResponse(content=data, headers=CACHE_HEADERS)
+
         page = page or 1
         page_items = q.offset((page - 1) * per_page).limit(per_page + 1).all()
         has_next = len(page_items) > per_page
         items = page_items[:per_page]
-        # Evita count() pesado en cada carga del board. Se calcula de forma perezosa en otras vistas.
-        total = None
+        total = q.order_by(None).count() if include_totals else None
+        pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
         data = {
             "tarjetas": _serialize_board_items(items, db, include_image=include_image),
             "pagination": {
                 "page": page,
                 "per_page": per_page,
                 "total": total,
-                "pages": None,
+                "pages": pages,
                 "has_next": has_next,
                 "has_prev": page > 1,
             },
@@ -335,7 +375,7 @@ def get_tarjetas(
         return JSONResponse(content=data, headers=CACHE_HEADERS)
 
     if page is None and per_page is None:
-        items = q.all()
+        items = q.limit(500).all()
         all_data = _enrich_batch(items, db, include_image=include_image)
         return JSONResponse(content=all_data, headers=CACHE_HEADERS)
 
@@ -892,7 +932,19 @@ async def upload_tarjeta_media(
         file_data = await f.read()
         if len(file_data) > MAX_MEDIA_SIZE_BYTES:
             raise HTTPException(status_code=400, detail=f"Archivo excede {MAX_MEDIA_SIZE_BYTES // (1024 * 1024)}MB")
+        started = time.perf_counter()
         upload = storage.upload_bytes_required(file_data, mime, ALLOWED_MEDIA_MIME[mime])
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        from loguru import logger
+        logger.bind(
+            storage="R2",
+            bucket=storage._bucket,
+            key=upload.get("storage_key"),
+            tarjeta_id=id,
+            user_id=user.id,
+            mime_type=mime,
+            size_bytes=len(file_data),
+        ).info(f"media_upload_ok latency_ms={elapsed_ms}")
         item = RepairCardMedia(
             tarjeta_id=id,
             storage_key=upload.get("storage_key"),
