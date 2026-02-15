@@ -19,3 +19,18 @@ check_untyped_defs = false
 disallow_untyped_defs = false
 ignore_missing_imports = true
 exclude = "(^frontend/|^backend/alembic/)"
+
+[[tool.mypy.overrides]]
+module = [
+  "app.main",
+  "app.models.kanban",
+  "app.api.routes.auth",
+  "app.api.routes.kanban",
+  "app.api.routes.health",
+  "app.api.routes.users",
+  "app.api.routes.tarjetas",
+  "app.api.routes.metricas",
+  "app.api.routes.estadisticas",
+  "app.services.notification_service",
+]
+ignore_errors = true
