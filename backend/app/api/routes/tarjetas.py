@@ -1,7 +1,7 @@
-"""Rutas CRUD de tarjetas de reparación con todas las mejoras.
+"""Rutas CRUD de tarjetas de reparación.
 
-Mejoras integradas: #4 prioridad, #5 posición, #7 asignación, #9 notificaciones,
-#11 costos, #13 búsqueda server-side, #22 S3 storage, #23 soft delete, #28 SQLite compat.
+Mejoras integradas: prioridad, posición, asignación, notificaciones,
+costos, búsqueda server-side, S3 storage, soft delete, SQLite compat.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -9,8 +9,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, defer
-from sqlalchemy import func, text, or_, exists, and_, select
+from sqlalchemy import func, text, or_, exists, and_, select, insert, delete
 from sqlalchemy.exc import IntegrityError
+from loguru import logger
 
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -19,9 +20,16 @@ from app.core.cache import invalidate_stats
 from app.models.repair_card import RepairCard, StatusHistory, RepairCardMedia
 from app.models.kanban import SubTask, Comment, Tag, repair_card_tags, KanbanColumn
 from app.models.user import User
-from app.schemas.tarjeta import TarjetaCreate, TarjetaUpdate, BatchPosicionUpdate
+from app.schemas.tarjeta import (
+    TarjetaCreate,
+    TarjetaUpdate,
+    BatchPosicionUpdate,
+    BlockRequest,
+    BatchOperationRequest,
+    MediaReorderRequest,
+)
 from app.socket_events import sio
-from app.services.auth_service import get_current_user_optional
+from app.services.auth_service import get_current_user, get_current_user_optional, require_role
 from app.services.notification_service import notificar_cambio_estado
 from app.services.storage_service import get_storage_service
 
@@ -32,13 +40,62 @@ MAX_MEDIA_PER_CARD = 10
 MAX_MEDIA_SIZE_BYTES = 8 * 1024 * 1024
 ALLOWED_MEDIA_MIME = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
+# Map status to the date field that tracks when the card entered that status
+_STATUS_DATE_FIELDS = {
+    "ingresado": "ingresado_date",
+    "diagnosticada": "diagnosticada_date",
+    "para_entregar": "para_entregar_date",
+    "listos": "entregados_date",
+}
+
+
+def _calcular_dias_en_columna(card: RepairCard) -> int:
+    """Calculate days a card has been in its current column."""
+    now = datetime.now(timezone.utc)
+    field = _STATUS_DATE_FIELDS.get(card.status)
+    if field:
+        dt = getattr(card, field, None)
+        if dt:
+            # Handle both naive and aware datetimes from DB
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (now - dt).days
+    return 0
+
+
+def _apply_status_transition(card: RepairCard, new_status: str) -> None:
+    """Apply date fields for a status transition."""
+    if new_status == "diagnosticada" and not card.diagnosticada_date:
+        card.diagnosticada_date = datetime.now(timezone.utc)
+    elif new_status == "para_entregar" and not card.para_entregar_date:
+        card.para_entregar_date = datetime.now(timezone.utc)
+    elif new_status == "listos" and not card.entregados_date:
+        card.entregados_date = datetime.now(timezone.utc)
+
 
 def _get_valid_statuses(db: Session) -> list[str]:
-    """Obtiene estados válidos de las columnas configuradas (Mejora #2)."""
+    """Obtiene estados válidos de las columnas configuradas."""
     cols = db.query(KanbanColumn.key).order_by(KanbanColumn.position).all()
     if cols:
         return [c[0] for c in cols]
     return ["ingresado", "diagnosticada", "para_entregar", "listos"]
+
+
+def _check_wip_limit(db: Session, column_key: str, exclude_card_id: int | None = None) -> None:
+    """Check WIP limit for a column. Raises HTTPException if exceeded."""
+    col = db.query(KanbanColumn).filter(KanbanColumn.key == column_key).first()
+    if col and col.wip_limit:
+        q = db.query(RepairCard).filter(
+            RepairCard.status == column_key,
+            RepairCard.deleted_at.is_(None),
+        )
+        if exclude_card_id:
+            q = q.filter(RepairCard.id != exclude_card_id)
+        if q.count() >= col.wip_limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Límite WIP alcanzado en '{col.title}' ({col.wip_limit} máximo)"
+            )
 
 
 def _media_rows_for_card(db: Session, tarjeta_id: int) -> list[RepairCardMedia]:
@@ -72,7 +129,6 @@ def _media_cover_map(db: Session, card_ids: list[int]) -> tuple[dict[int, str | 
 def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> dict:
     """Enriquece una sola tarjeta (para endpoints de detalle)."""
     d = t.to_dict(include_image=include_image)
-    from sqlalchemy import select
     tag_ids = db.execute(
         select(repair_card_tags.c.tag_id).where(repair_card_tags.c.repair_card_id == t.id)
     ).scalars().all()
@@ -95,37 +151,19 @@ def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> d
         }
         for m in media_rows[:3]
     ]
-    now = datetime.utcnow()
-    try:
-        if t.status == "ingresado" and t.ingresado_date:
-            d["dias_en_columna"] = (now - t.ingresado_date).days
-        elif t.status == "diagnosticada" and t.diagnosticada_date:
-            d["dias_en_columna"] = (now - t.diagnosticada_date).days
-        elif t.status == "para_entregar" and t.para_entregar_date:
-            d["dias_en_columna"] = (now - t.para_entregar_date).days
-        elif t.status == "listos" and t.entregados_date:
-            d["dias_en_columna"] = (now - t.entregados_date).days
-        else:
-            d["dias_en_columna"] = 0
-    except Exception:
-        d["dias_en_columna"] = 0
+    d["dias_en_columna"] = _calcular_dias_en_columna(t)
     return d
 
 
 def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = True) -> list[dict]:
-    """Enriquece múltiples tarjetas con solo 3 queries totales (batch).
-
-    Antes: 3 queries × N tarjetas = O(N) queries.
-    Ahora: 3 queries totales sin importar N.
-    """
+    """Enriquece múltiples tarjetas con queries batch O(1) en vez de O(N)."""
     if not items:
         return []
 
-    from sqlalchemy import select
     card_ids = [t.id for t in items]
     cover_map, media_count_map = _media_cover_map(db, card_ids)
 
-    # --- 1. Bulk tags (2 queries: links + tag objects) ---
+    # Bulk tags
     tag_links = db.execute(
         select(repair_card_tags.c.repair_card_id, repair_card_tags.c.tag_id)
         .where(repair_card_tags.c.repair_card_id.in_(card_ids))
@@ -140,7 +178,7 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
         if link.tag_id in tags_by_id:
             card_tags[link.repair_card_id].append(tags_by_id[link.tag_id])
 
-    # --- 2. Bulk subtask counts (2 queries: total + done) ---
+    # Bulk subtask counts
     subtask_total: dict[int, int] = {}
     for row in db.query(SubTask.tarjeta_id, func.count(SubTask.id)).filter(
         SubTask.tarjeta_id.in_(card_ids)
@@ -153,15 +191,13 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
     ).group_by(SubTask.tarjeta_id).all():
         subtask_done[row[0]] = row[1]
 
-    # --- 3. Bulk comment counts (1 query) ---
+    # Bulk comment counts
     comment_counts: dict[int, int] = {}
     for row in db.query(Comment.tarjeta_id, func.count(Comment.id)).filter(
         Comment.tarjeta_id.in_(card_ids)
     ).group_by(Comment.tarjeta_id).all():
         comment_counts[row[0]] = row[1]
 
-    # --- Build enriched dicts ---
-    now = datetime.utcnow()
     result = []
     for t in items:
         d = t.to_dict(include_image=include_image)
@@ -171,19 +207,7 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
         d["comments_count"] = comment_counts.get(t.id, 0)
         d["cover_thumb_url"] = cover_map.get(t.id) or (t.image_url if include_image else None)
         d["media_count"] = media_count_map.get(t.id, 0)
-        try:
-            if t.status == "ingresado" and t.ingresado_date:
-                d["dias_en_columna"] = (now - t.ingresado_date).days
-            elif t.status == "diagnosticada" and t.diagnosticada_date:
-                d["dias_en_columna"] = (now - t.diagnosticada_date).days
-            elif t.status == "para_entregar" and t.para_entregar_date:
-                d["dias_en_columna"] = (now - t.para_entregar_date).days
-            elif t.status == "listos" and t.entregados_date:
-                d["dias_en_columna"] = (now - t.entregados_date).days
-            else:
-                d["dias_en_columna"] = 0
-        except Exception:
-            d["dias_en_columna"] = 0
+        d["dias_en_columna"] = _calcular_dias_en_columna(t)
         result.append(d)
     return result
 
@@ -217,11 +241,14 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
             "tags": item.get("tags", []),
             "cover_thumb_url": item.get("cover_thumb_url"),
             "media_count": item.get("media_count", 0),
-            # Compatibilidad temporal
             "imagen_url": item.get("cover_thumb_url") or item.get("imagen_url"),
         })
     return compact
 
+
+# ──────────────────────────────────────────────────────────────
+# CRUD Endpoints
+# ──────────────────────────────────────────────────────────────
 
 @router.get("")
 def get_tarjetas(
@@ -229,7 +256,6 @@ def get_tarjetas(
     page: int | None = Query(None),
     per_page: int | None = Query(None),
     light: int | None = Query(None),
-    # Mejora #13: Búsqueda server-side
     search: str | None = Query(None),
     estado: str | None = Query(None),
     prioridad: str | None = Query(None),
@@ -250,14 +276,12 @@ def get_tarjetas(
 
     q = db.query(RepairCard)
 
-    # Mejora #23: Soft delete — excluir eliminadas por defecto
     if not include_deleted:
         q = q.filter(RepairCard.deleted_at.is_(None))
 
     if not include_image:
         q = q.options(defer(RepairCard.image_url))
 
-    # Mejora #13: Filtros server-side
     if search:
         search_term = f"%{search}%"
         q = q.filter(or_(
@@ -290,7 +314,6 @@ def get_tarjetas(
             )
         )
 
-    # Mejora #5: Ordenar por posición dentro de cada estado, luego por prioridad
     q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
 
     if board_mode:
@@ -312,15 +335,10 @@ def get_tarjetas(
         }
         return JSONResponse(content=data, headers=CACHE_HEADERS)
 
-    try:
-        if page is None and per_page is None:
-            items = q.all()
-            data = _enrich_batch(items, db, include_image=include_image)
-            return JSONResponse(content=data, headers=CACHE_HEADERS)
-    except Exception as e:
-        from loguru import logger
-        logger.error(f"Error in GET /api/tarjetas: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if page is None and per_page is None:
+        items = q.all()
+        data = _enrich_batch(items, db, include_image=include_image)
+        return JSONResponse(content=data, headers=CACHE_HEADERS)
 
     per_page = min(per_page or 50, 100)
     page = page or 1
@@ -338,6 +356,15 @@ def get_tarjetas(
         },
     }
     return JSONResponse(content=data, headers=CACHE_HEADERS)
+
+
+@router.get("/trash/list")
+def get_trash(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    items = db.query(RepairCard).filter(RepairCard.deleted_at.isnot(None)).order_by(RepairCard.deleted_at.desc()).all()
+    return [t.to_dict() for t in items]
 
 
 @router.get("/{id}")
@@ -378,13 +405,13 @@ async def create_tarjeta(
         else:
             imagen_url = storage.upload_image(imagen_url)
 
-    # Mejora #7: Asignación de técnico
+    # Asignación de técnico
     assigned_name = None
     if data.asignado_a:
         tech = db.query(User).filter(User.id == data.asignado_a).first()
         assigned_name = tech.full_name if tech else None
 
-    # Mejora #5: Siguiente posición en la columna
+    # Siguiente posición en la columna
     max_pos = db.query(func.max(RepairCard.position)).filter(
         RepairCard.status == "ingresado", RepairCard.deleted_at.is_(None)
     ).scalar() or 0
@@ -427,9 +454,7 @@ async def create_tarjeta(
         else:
             raise HTTPException(status_code=500, detail="Error de integridad al crear tarjeta")
 
-    # Mejora #10: Asignar tags
     if data.tags:
-        from sqlalchemy import insert
         for tag_id in data.tags:
             try:
                 db.execute(insert(repair_card_tags).values(repair_card_id=t.id, tag_id=tag_id))
@@ -490,16 +515,10 @@ async def update_tarjeta(
         t.has_charger = upd["tiene_cargador"]
     if "notas_tecnicas" in upd:
         t.technical_notes = upd["notas_tecnicas"] or None
-
-    # Mejora #4: Prioridad
     if "prioridad" in upd:
         t.priority = upd["prioridad"]
-
-    # Mejora #5: Posición
     if "posicion" in upd:
         t.position = upd["posicion"]
-
-    # Mejora #7: Asignación
     if "asignado_a" in upd:
         t.assigned_to = upd["asignado_a"]
         if upd["asignado_a"]:
@@ -507,8 +526,6 @@ async def update_tarjeta(
             t.assigned_name = tech.full_name if tech else None
         else:
             t.assigned_name = None
-
-    # Mejora #11: Costos
     if "costo_estimado" in upd:
         t.estimated_cost = upd["costo_estimado"]
     if "costo_final" in upd:
@@ -516,9 +533,8 @@ async def update_tarjeta(
     if "notas_costo" in upd:
         t.cost_notes = upd["notas_costo"]
 
-    # Mejora #10: Tags
+    # Tags
     if "tags" in upd and upd["tags"] is not None:
-        from sqlalchemy import insert, delete
         db.execute(delete(repair_card_tags).where(repair_card_tags.c.repair_card_id == t.id))
         for tag_id in upd["tags"]:
             try:
@@ -533,17 +549,7 @@ async def update_tarjeta(
         if nuevo not in valid_statuses:
             raise HTTPException(status_code=400, detail=f"Estado no válido. Permitidos: {valid_statuses}")
 
-        # Mejora #12: WIP Limit check
-        col = db.query(KanbanColumn).filter(KanbanColumn.key == nuevo).first()
-        if col and col.wip_limit:
-            current_count = db.query(RepairCard).filter(
-                RepairCard.status == nuevo, RepairCard.deleted_at.is_(None), RepairCard.id != id
-            ).count()
-            if current_count >= col.wip_limit:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Límite WIP alcanzado en '{col.title}' ({col.wip_limit} máximo)"
-                )
+        _check_wip_limit(db, nuevo, exclude_card_id=id)
 
         old_status = t.status
         if old_status != nuevo:
@@ -555,16 +561,10 @@ async def update_tarjeta(
                 changed_by=user.id if user else None,
                 changed_by_name=user.full_name if user else None,
             ))
-            # Mejora #9: Notificaciones
             notificar_cambio_estado(db, t, old_status, nuevo)
 
         t.status = nuevo
-        if nuevo == "diagnosticada" and not t.diagnosticada_date:
-            t.diagnosticada_date = datetime.now(timezone.utc)
-        elif nuevo == "para_entregar" and not t.para_entregar_date:
-            t.para_entregar_date = datetime.now(timezone.utc)
-        elif nuevo == "listos" and not t.entregados_date:
-            t.entregados_date = datetime.now(timezone.utc)
+        _apply_status_transition(t, nuevo)
 
     db.commit()
     db.refresh(t)
@@ -578,9 +578,16 @@ async def update_tarjeta(
     return result
 
 
-# Mejora #1, #5: Batch position update para Drag & Drop
+# ──────────────────────────────────────────────────────────────
+# Batch & Position Endpoints
+# ──────────────────────────────────────────────────────────────
+
 @router.put("/batch/positions")
-async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depends(get_db)):
+async def batch_update_positions(
+    data: BatchPosicionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     changed: list[dict] = []
     for item in data.items:
         t = db.query(RepairCard).filter(RepairCard.id == item.id).first()
@@ -588,31 +595,16 @@ async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depend
             old_status = t.status
             t.position = item.posicion
             if t.status != item.columna:
-                # Verificar WIP limit
-                col = db.query(KanbanColumn).filter(KanbanColumn.key == item.columna).first()
-                if col and col.wip_limit:
-                    current_count = db.query(RepairCard).filter(
-                        RepairCard.status == item.columna,
-                        RepairCard.deleted_at.is_(None),
-                        RepairCard.id != item.id,
-                    ).count()
-                    if current_count >= col.wip_limit:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Límite WIP alcanzado en '{col.title}'"
-                        )
+                _check_wip_limit(db, item.columna, exclude_card_id=item.id)
 
                 db.add(StatusHistory(
                     tarjeta_id=t.id, old_status=old_status, new_status=item.columna,
                     changed_at=datetime.now(timezone.utc),
+                    changed_by=user.id,
+                    changed_by_name=user.full_name,
                 ))
                 t.status = item.columna
-                if item.columna == "diagnosticada" and not t.diagnosticada_date:
-                    t.diagnosticada_date = datetime.now(timezone.utc)
-                elif item.columna == "para_entregar" and not t.para_entregar_date:
-                    t.para_entregar_date = datetime.now(timezone.utc)
-                elif item.columna == "listos" and not t.entregados_date:
-                    t.entregados_date = datetime.now(timezone.utc)
+                _apply_status_transition(t, item.columna)
             changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
 
     db.commit()
@@ -624,9 +616,72 @@ async def batch_update_positions(data: BatchPosicionUpdate, db: Session = Depend
     return {"ok": True}
 
 
-# Mejora #23: Soft delete
+@router.post("/batch")
+async def batch_operations(
+    data: BatchOperationRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Operaciones en lote sobre múltiples tarjetas."""
+    cards = db.query(RepairCard).filter(RepairCard.id.in_(data.ids)).all()
+    if not cards:
+        raise HTTPException(status_code=404, detail="No cards found")
+
+    updated = []
+    for t in cards:
+        if data.action == "move" and data.value:
+            old_status = t.status
+            t.status = data.value
+            _apply_status_transition(t, data.value)
+            db.add(StatusHistory(
+                tarjeta_id=t.id, old_status=old_status, new_status=data.value,
+                changed_at=datetime.now(timezone.utc),
+                changed_by=user.id,
+                changed_by_name=data.user_name or user.full_name,
+            ))
+        elif data.action == "assign" and data.value is not None:
+            t.assigned_to = int(data.value) if data.value else None
+            t.assigned_name = data.assign_name or ""
+        elif data.action == "priority" and data.value:
+            t.priority = data.value
+        elif data.action == "delete":
+            t.deleted_at = datetime.now(timezone.utc)
+        elif data.action == "tag" and data.value is not None:
+            existing = db.execute(
+                select(repair_card_tags.c.tag_id).where(
+                    repair_card_tags.c.repair_card_id == t.id,
+                    repair_card_tags.c.tag_id == int(data.value),
+                )
+            ).first()
+            if not existing:
+                db.execute(repair_card_tags.insert().values(
+                    repair_card_id=t.id, tag_id=int(data.value),
+                ))
+        updated.append(t.id)
+
+    db.commit()
+    invalidate_stats()
+
+    refreshed = db.query(RepairCard).filter(RepairCard.id.in_(updated)).all()
+    result = _enrich_batch(refreshed, db)
+    try:
+        for r in result:
+            await sio.emit("tarjeta_actualizada", {"event_version": 1, "data": r})
+    except Exception:
+        pass
+    return {"ok": True, "updated": len(updated), "tarjetas": result}
+
+
+# ──────────────────────────────────────────────────────────────
+# Delete / Restore Endpoints
+# ──────────────────────────────────────────────────────────────
+
 @router.delete("/{id}", status_code=204)
-async def delete_tarjeta(id: int, db: Session = Depends(get_db)):
+async def delete_tarjeta(
+    id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
@@ -640,9 +695,12 @@ async def delete_tarjeta(id: int, db: Session = Depends(get_db)):
     return None
 
 
-# Mejora #23: Restaurar tarjeta eliminada
 @router.put("/{id}/restore")
-async def restore_tarjeta(id: int, db: Session = Depends(get_db)):
+async def restore_tarjeta(
+    id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
@@ -658,9 +716,12 @@ async def restore_tarjeta(id: int, db: Session = Depends(get_db)):
     return result
 
 
-# Mejora #23: Eliminar permanentemente
 @router.delete("/{id}/permanent", status_code=204)
-async def permanent_delete_tarjeta(id: int, db: Session = Depends(get_db)):
+async def permanent_delete_tarjeta(
+    id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
@@ -684,12 +745,9 @@ async def permanent_delete_tarjeta(id: int, db: Session = Depends(get_db)):
     return None
 
 
-# Mejora #23: Listar tarjetas eliminadas (papelera)
-@router.get("/trash/list")
-def get_trash(db: Session = Depends(get_db)):
-    items = db.query(RepairCard).filter(RepairCard.deleted_at.isnot(None)).order_by(RepairCard.deleted_at.desc()).all()
-    return [t.to_dict() for t in items]
-
+# ──────────────────────────────────────────────────────────────
+# Timeline & History
+# ──────────────────────────────────────────────────────────────
 
 @router.get("/{id}/historial")
 def get_historial(id: int, db: Session = Depends(get_db)):
@@ -758,6 +816,10 @@ def get_timeline(
     }
 
 
+# ──────────────────────────────────────────────────────────────
+# Media Endpoints
+# ──────────────────────────────────────────────────────────────
+
 @router.get("/{id}/media")
 def get_tarjeta_media(id: int, db: Session = Depends(get_db)):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
@@ -788,6 +850,7 @@ async def upload_tarjeta_media(
     id: int,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     settings = get_settings()
     if not settings.media_v2_read_write:
@@ -809,10 +872,10 @@ async def upload_tarjeta_media(
         mime = (f.content_type or "").lower()
         if mime not in ALLOWED_MEDIA_MIME:
             raise HTTPException(status_code=400, detail=f"Formato no soportado: {mime}")
-        data = await f.read()
-        if len(data) > MAX_MEDIA_SIZE_BYTES:
+        file_data = await f.read()
+        if len(file_data) > MAX_MEDIA_SIZE_BYTES:
             raise HTTPException(status_code=400, detail=f"Archivo excede {MAX_MEDIA_SIZE_BYTES // (1024 * 1024)}MB")
-        upload = storage.upload_bytes_required(data, mime, ALLOWED_MEDIA_MIME[mime])
+        upload = storage.upload_bytes_required(file_data, mime, ALLOWED_MEDIA_MIME[mime])
         item = RepairCardMedia(
             tarjeta_id=id,
             storage_key=upload.get("storage_key"),
@@ -821,7 +884,7 @@ async def upload_tarjeta_media(
             position=next_pos,
             is_cover=(len(current) == 0 and next_pos == 0),
             mime_type=mime,
-            size_bytes=len(data),
+            size_bytes=len(file_data),
         )
         db.add(item)
         db.flush()
@@ -833,23 +896,32 @@ async def upload_tarjeta_media(
 
 
 @router.put("/{id}/media/reorder")
-def reorder_tarjeta_media(id: int, items: list[dict], db: Session = Depends(get_db)):
+def reorder_tarjeta_media(
+    id: int,
+    data: MediaReorderRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
     by_id = {m.id: m for m in _media_rows_for_card(db, id)}
-    for entry in items:
-        media_id = int(entry.get("id"))
-        pos = int(entry.get("position"))
-        m = by_id.get(media_id)
+    for entry in data.items:
+        m = by_id.get(entry.id)
         if m:
-            m.position = pos
+            m.position = entry.position
     db.commit()
     return {"ok": True}
 
 
 @router.patch("/{id}/media/{media_id}")
-def update_tarjeta_media(id: int, media_id: int, body: dict, db: Session = Depends(get_db)):
+def update_tarjeta_media(
+    id: int,
+    media_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
@@ -872,7 +944,12 @@ def update_tarjeta_media(id: int, media_id: int, body: dict, db: Session = Depen
 
 
 @router.delete("/{id}/media/{media_id}", status_code=204)
-def delete_tarjeta_media(id: int, media_id: int, db: Session = Depends(get_db)):
+def delete_tarjeta_media(
+    id: int,
+    media_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
@@ -902,19 +979,26 @@ def delete_tarjeta_media(id: int, media_id: int, db: Session = Depends(get_db)):
     return None
 
 
-# --- Blocked cards ---
+# ──────────────────────────────────────────────────────────────
+# Block / Unblock
+# ──────────────────────────────────────────────────────────────
+
 @router.patch("/{id}/block")
-async def block_tarjeta(id: int, body: dict, db: Session = Depends(get_db)):
+async def block_tarjeta(
+    id: int,
+    data: BlockRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Bloquear o desbloquear una tarjeta."""
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
-    blocked = body.get("blocked", True)
-    if blocked:
-        t.blocked_at = datetime.utcnow()
-        t.blocked_reason = body.get("reason", "")
-        t.blocked_by = body.get("user_id")
+    if data.blocked:
+        t.blocked_at = datetime.now(timezone.utc)
+        t.blocked_reason = data.reason or ""
+        t.blocked_by = data.user_id or user.id
     else:
         t.blocked_at = None
         t.blocked_reason = None
@@ -928,73 +1012,3 @@ async def block_tarjeta(id: int, body: dict, db: Session = Depends(get_db)):
     except Exception:
         pass
     return result
-
-
-# --- Batch operations ---
-@router.post("/batch")
-async def batch_operations(body: dict, db: Session = Depends(get_db)):
-    """Operaciones en lote sobre múltiples tarjetas.
-
-    body: { ids: [1,2,3], action: "move"|"assign"|"tag"|"priority"|"delete",
-            value: "diagnosticada" | user_id | tag_id | "alta" }
-    """
-    ids = body.get("ids", [])
-    action = body.get("action")
-    value = body.get("value")
-
-    if not ids or not action:
-        raise HTTPException(status_code=400, detail="ids and action required")
-
-    cards = db.query(RepairCard).filter(RepairCard.id.in_(ids)).all()
-    if not cards:
-        raise HTTPException(status_code=404, detail="No cards found")
-
-    updated = []
-    for t in cards:
-        if action == "move" and value:
-            old_status = t.status
-            t.status = value
-            if value == "diagnosticada" and not t.diagnosticada_date:
-                t.diagnosticada_date = datetime.utcnow()
-            elif value == "para_entregar" and not t.para_entregar_date:
-                t.para_entregar_date = datetime.utcnow()
-            elif value == "listos" and not t.entregados_date:
-                t.entregados_date = datetime.utcnow()
-            db.add(StatusHistory(
-                tarjeta_id=t.id, old_status=old_status, new_status=value,
-                changed_by_name=body.get("user_name", "Batch"),
-            ))
-        elif action == "assign" and value is not None:
-            t.assigned_to = int(value) if value else None
-            t.assigned_name = body.get("assign_name", "")
-        elif action == "priority" and value:
-            t.priority = value
-        elif action == "delete":
-            t.deleted_at = datetime.utcnow()
-        elif action == "tag" and value is not None:
-            from sqlalchemy import select
-            existing = db.execute(
-                select(repair_card_tags.c.tag_id).where(
-                    repair_card_tags.c.repair_card_id == t.id,
-                    repair_card_tags.c.tag_id == int(value),
-                )
-            ).first()
-            if not existing:
-                db.execute(repair_card_tags.insert().values(
-                    repair_card_id=t.id, tag_id=int(value),
-                ))
-        updated.append(t.id)
-
-    db.commit()
-    invalidate_stats()
-
-    # Return updated cards
-    refreshed = db.query(RepairCard).filter(RepairCard.id.in_(updated)).all()
-    result = _enrich_batch(refreshed, db)
-    try:
-        for r in result:
-            await sio.emit("tarjeta_actualizada", {"event_version": 1, "data": r})
-    except Exception:
-        pass
-    return {"ok": True, "updated": len(updated), "tarjetas": result}
-

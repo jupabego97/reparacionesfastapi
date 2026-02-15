@@ -1,28 +1,42 @@
+# ── Core ──
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-dotenv>=1.0.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
+
+# ── Database ──
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 alembic>=1.13.0
+
+# ── Real-time ──
 python-socketio>=5.10.0
+
+# ── File handling ──
 python-multipart>=0.0.6
-loguru>=0.7.2
 Pillow>=10.0.0
+
+# ── Data export ──
 pandas>=2.0.0
 openpyxl>=3.1.0
+
+# ── AI (image analysis) ──
 google-generativeai>=0.8.3
 tenacity>=8.2.3
-pytest>=7.0.0
-httpx>=0.27.0
-slowapi>=0.1.9
-# Auth
+
+# ── Auth ──
 PyJWT>=2.8.0
 bcrypt>=4.0.0
-# S3 storage
+
+# ── S3 storage ──
 boto3>=1.34.0
-# Date utilities
+
+# ── Utilities ──
 python-dateutil>=2.8.0
+loguru>=0.7.2
+slowapi>=0.1.9
+
+# ── Observability ──
 sentry-sdk[fastapi]>=2.19.0
 prometheus-fastapi-instrumentator>=7.0.0
