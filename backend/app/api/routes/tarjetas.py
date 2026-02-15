@@ -328,8 +328,8 @@ def get_tarjetas(
             if cursor:
                 try:
                     cursor_id = int(cursor)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Cursor invalido")
+                except ValueError as err:
+                    raise HTTPException(status_code=400, detail="Cursor invalido") from err
                 fast_q = fast_q.filter(RepairCard.id > cursor_id)
 
             page_items = fast_q.limit(per_page + 1).all()

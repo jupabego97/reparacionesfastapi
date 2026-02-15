@@ -99,7 +99,7 @@ def storage_smoke(
         raise HTTPException(status_code=503, detail="Storage remoto no disponible")
 
     key = f"healthchecks/smoke-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.txt"
-    body = f"smoke-by:{admin.username}".encode("utf-8")
+    body = f"smoke-by:{admin.username}".encode()
     started = datetime.now(UTC)
     storage._client.put_object(Bucket=storage._bucket, Key=key, Body=body, ContentType="text/plain")
     storage._client.head_object(Bucket=storage._bucket, Key=key)
