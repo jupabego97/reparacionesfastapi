@@ -5,7 +5,6 @@ import os
 import re
 import tempfile
 
-import google.generativeai as genai
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
@@ -53,8 +52,11 @@ class GeminiService:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key == "your_gemini_api_key_here":
             raise ValueError("GEMINI_API_KEY no configurada")
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel("gemini-flash-latest")
+        import google.generativeai as genai
+
+        self._genai = genai
+        self._genai.configure(api_key=api_key)
+        self.model = self._genai.GenerativeModel("gemini-flash-latest")
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
     def extract_client_info_from_image(self, image_data, image_format="jpeg"):
@@ -106,10 +108,10 @@ class GeminiService:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(audio_data)
                 path = f.name
-            uploaded = genai.upload_file(path, mime_type="audio/wav")
+            uploaded = self._genai.upload_file(path, mime_type="audio/wav")
             response = self.model.generate_content(["Transcribe exactamente lo que dice la persona. Solo el texto.", uploaded])
             try:
-                genai.delete_file(uploaded.name)
+                self._genai.delete_file(uploaded.name)
             except Exception:
                 pass
             return response.text.strip() if response.text else "No se pudo transcribir"

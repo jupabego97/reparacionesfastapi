@@ -326,7 +326,13 @@ export default function App() {
     if (!isAuthenticated) return;
 
     const url = API_BASE || window.location.origin;
-    const s = io(url, { transports: ['websocket', 'polling'], reconnection: true });
+    const safeModeEnv = import.meta.env.VITE_SOCKETIO_SAFE_MODE;
+    const safeMode = safeModeEnv ? safeModeEnv === 'true' : import.meta.env.PROD;
+    const s = io(url, {
+      transports: safeMode ? ['polling'] : ['polling', 'websocket'],
+      upgrade: !safeMode,
+      reconnection: true,
+    });
 
     s.on('connect', () => setConnStatus('connected'));
     s.on('disconnect', () => setConnStatus('disconnected'));
