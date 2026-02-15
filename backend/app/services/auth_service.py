@@ -1,13 +1,12 @@
 """Servicio de autenticación con JWT y hashing de contraseñas."""
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-import jwt
 import bcrypt
+import jwt
 from fastapi import Depends, HTTPException, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -31,7 +30,7 @@ def create_token(user: User) -> str:
         "username": user.username,
         "role": user.role,
         "name": user.full_name,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes),
+        "exp": datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
@@ -40,24 +39,24 @@ def decode_token(token: str) -> dict:
     settings = get_settings()
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expirado")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Token inválido")
+    except jwt.ExpiredSignatureError as err:
+        raise HTTPException(status_code=401, detail="Token expirado") from err
+    except jwt.InvalidTokenError as err:
+        raise HTTPException(status_code=401, detail="Token inválido") from err
 
 
 def get_current_user_optional(
     request: Request,
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    creds: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
-) -> Optional[User]:
+) -> User | None:
     """Retorna el usuario autenticado o None si no hay token."""
     if not creds:
         return None
     try:
         payload = decode_token(creds.credentials)
         user_id = int(payload["sub"])
-        user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+        user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
         return user
     except Exception:
         return None
@@ -65,7 +64,7 @@ def get_current_user_optional(
 
 def get_current_user(
     request: Request,
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    creds: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     """Requiere autenticación. Lanza 401 si no hay token válido."""
@@ -73,7 +72,7 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="No autenticado")
     payload = decode_token(creds.credentials)
     user_id = int(payload["sub"])
-    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
     return user

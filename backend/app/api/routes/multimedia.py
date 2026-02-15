@@ -1,11 +1,10 @@
 import base64
 import concurrent.futures
-from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.limiter import limiter
 from app.services.gemini_service import get_gemini_service
@@ -84,15 +83,15 @@ async def transcribir_audio(request: Request, audio: UploadFile = File(...)):
     try:
         transcripcion = executor.submit(gemini.transcribe_audio, data).result(timeout=30)
         return {"transcripcion": transcripcion}
-    except concurrent.futures.TimeoutError:
-        raise HTTPException(status_code=408, detail="Timeout procesando audio")
+    except concurrent.futures.TimeoutError as err:
+        raise HTTPException(status_code=408, detail="Timeout procesando audio") from err
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class ProcesarMultimediaBody(BaseModel):
     image: str
-    audio: Optional[str] = None
+    audio: str | None = None
 
 
 @router.post("/procesar-multimedia")
@@ -125,8 +124,8 @@ def procesar_multimedia(request: Request, data: ProcesarMultimediaBody):
         f_img = executor.submit(task_imagen)
         f_aud = executor.submit(task_audio)
         return {"imagen": f_img.result(timeout=30), "audio": f_aud.result(timeout=30)}
-    except concurrent.futures.TimeoutError:
+    except concurrent.futures.TimeoutError as err:
         raise HTTPException(
             status_code=408,
             detail="Timeout",
-        )
+        ) from err

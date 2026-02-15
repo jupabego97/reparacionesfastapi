@@ -765,6 +765,31 @@ body {
   line-height: 1.5;
 }
 
+/* Technical notes visible on card */
+.tarjeta-notas-tecnicas {
+  padding: 0.3rem 0.75rem 0.3rem 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.06);
+  border-left: 2px solid var(--warning);
+  margin: 0.2rem 0.5rem;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  line-height: 1.4;
+}
+
+.tarjeta-notas-tecnicas i {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+}
+
+.tarjeta-notas-tecnicas span {
+  word-break: break-word;
+}
+
 /* Tags */
 .tarjeta-tags {
   padding: 0.3rem 0.75rem 0.4rem 1rem;

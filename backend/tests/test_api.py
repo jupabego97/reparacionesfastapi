@@ -1,4 +1,6 @@
 """Core API tests: health, CRUD, status transitions."""
+from datetime import UTC
+
 from tests.conftest import client
 
 
@@ -124,7 +126,8 @@ def test_create_with_negative_cost():
 
 def _create_cards_directly(db_session, count, **kwargs):
     """Helper to create cards directly in DB, bypassing rate limits."""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.models.repair_card import RepairCard
     cards = []
     for i in range(count):
@@ -132,9 +135,9 @@ def _create_cards_directly(db_session, count, **kwargs):
             owner_name=kwargs.get("owner_name", f"Card{i}"),
             problem=kwargs.get("problem", "Test"),
             status="ingresado",
-            start_date=datetime.now(timezone.utc),
-            due_date=datetime.now(timezone.utc),
-            ingresado_date=datetime.now(timezone.utc),
+            start_date=datetime.now(UTC),
+            due_date=datetime.now(UTC),
+            ingresado_date=datetime.now(UTC),
             priority="media",
             position=i,
         )
@@ -170,17 +173,18 @@ def test_board_view(sample_tarjeta):
 
 
 def test_search_filter(db_session):
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.models.repair_card import RepairCard
     db_session.add(RepairCard(
         owner_name="UniqueSearchName", problem="Test", status="ingresado",
-        start_date=datetime.now(timezone.utc), due_date=datetime.now(timezone.utc),
-        ingresado_date=datetime.now(timezone.utc), priority="media", position=0,
+        start_date=datetime.now(UTC), due_date=datetime.now(UTC),
+        ingresado_date=datetime.now(UTC), priority="media", position=0,
     ))
     db_session.add(RepairCard(
         owner_name="Other", problem="Test", status="ingresado",
-        start_date=datetime.now(timezone.utc), due_date=datetime.now(timezone.utc),
-        ingresado_date=datetime.now(timezone.utc), priority="media", position=1,
+        start_date=datetime.now(UTC), due_date=datetime.now(UTC),
+        ingresado_date=datetime.now(UTC), priority="media", position=1,
     ))
     db_session.commit()
 

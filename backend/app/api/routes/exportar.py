@@ -1,11 +1,11 @@
 import csv
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO, StringIO
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse, Response
-from sqlalchemy.orm import Session
 import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.limiter import limiter
@@ -57,7 +57,7 @@ def exportar_datos(
     if total_count == 0:
         raise HTTPException(status_code=404, detail="No hay datos para exportar con los filtros especificados")
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     ordered = query.order_by(RepairCard.start_date.desc())
 
     if formato == "excel":

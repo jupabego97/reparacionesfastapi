@@ -1,5 +1,4 @@
 """Security and authentication tests."""
-import os
 
 from tests.conftest import client
 

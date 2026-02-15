@@ -4,9 +4,8 @@ Mejora #22: Migra imágenes de base64 en BD a almacenamiento S3.
 Si S3 no está configurado, mantiene compatibilidad con base64.
 """
 import base64
-import io
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -53,7 +52,7 @@ class StorageService:
                 ext = "jpeg"
 
             raw = base64.b64decode(encoded)
-            filename = f"repairs/{datetime.now(timezone.utc).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
+            filename = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
 
             self._client.put_object(
                 Bucket=self._bucket,
@@ -94,7 +93,7 @@ class StorageService:
                 ext = "jpeg"
 
             raw = base64.b64decode(encoded)
-            key = f"repairs/{datetime.now(timezone.utc).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
+            key = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
             self._client.put_object(Bucket=self._bucket, Key=key, Body=raw, ContentType=content_type)
 
             settings = get_settings()
@@ -111,7 +110,7 @@ class StorageService:
         if not self.use_s3 or not self._client:
             raise RuntimeError("Storage remoto no disponible para media_v2")
         try:
-            key = f"repairs/{datetime.now(timezone.utc).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
+            key = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
             self._client.put_object(Bucket=self._bucket, Key=key, Body=content, ContentType=mime_type)
             settings = get_settings()
             if settings.s3_endpoint_url:

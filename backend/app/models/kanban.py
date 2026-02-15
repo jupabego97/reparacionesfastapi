@@ -2,11 +2,11 @@
 
 Incluye: KanbanColumn, Tag, SubTask, Comment, Notification.
 """
-from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, Boolean, Float, ForeignKey, Table, Index
-from sqlalchemy.orm import relationship
-from app.core.database import Base
+from datetime import UTC, datetime
 
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, Table, Text
+
+from app.core.database import Base
 
 # --- Tabla intermedia para relación M:N tarjetas <-> tags ---
 repair_card_tags = Table(
@@ -32,7 +32,7 @@ class KanbanColumn(Base):
     is_done_column = Column(Boolean, nullable=False, default=False)
     sla_hours = Column(Integer, nullable=True)                    # Alerta SLA (horas máx en esta columna)
     required_fields = Column(Text, nullable=True)                 # JSON: campos requeridos para entrar
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict:
         import json
@@ -77,7 +77,7 @@ class SubTask(Base):
     title = Column(Text, nullable=False)
     completed = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
     completed_at = Column(DateTime, nullable=True)
 
     def to_dict(self) -> dict:
@@ -101,7 +101,7 @@ class Comment(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     author_name = Column(Text, nullable=False, default="Sistema")
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict:
         return {
@@ -125,7 +125,7 @@ class Notification(Base):
     message = Column(Text, nullable=False)
     type = Column(Text, nullable=False, default="info")  # info, success, warning, error
     read = Column(Boolean, nullable=False, default=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True)
 
     def to_dict(self) -> dict:
         read_at = self.created_at if self.read else None
@@ -154,7 +154,7 @@ class CardTemplate(Base):
     default_priority = Column(Text, nullable=False, default="media")
     default_notes = Column(Text, nullable=True)
     estimated_hours = Column(Float, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict:
         return {

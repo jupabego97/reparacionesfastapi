@@ -117,6 +117,13 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         <p className="tarjeta-problem">{t.problema_resumen || (t.problema!.length > 80 ? t.problema!.slice(0, 80) + '...' : t.problema)}</p>
       )}
 
+      {t.notas_tecnicas && (
+        <div className="tarjeta-notas-tecnicas">
+          <i className="fas fa-wrench"></i>
+          <span>{t.notas_tecnicas.length > 100 ? t.notas_tecnicas.slice(0, 100) + '...' : t.notas_tecnicas}</span>
+        </div>
+      )}
+
       {t.tags && t.tags.length > 0 && (
         <div className="tarjeta-tags">
           {t.tags.map(tag => (
@@ -152,7 +159,6 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
             </span>
           )}
           {t.tiene_cargador === 'si' && <span className="charger-badge" title="Con cargador"><i className="fas fa-plug"></i></span>}
-          {t.notas_tecnicas && <span className="notes-badge" title={t.notas_tecnicas}><i className="fas fa-wrench"></i></span>}
           {t.comments_count > 0 && <span className="comments-badge"><i className="fas fa-comment"></i> {t.comments_count}</span>}
           {t.costo_estimado != null && (
             <span className="cost-badge" title={`Estimado: $${t.costo_estimado.toLocaleString()}`}>
