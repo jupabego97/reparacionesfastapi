@@ -323,7 +323,9 @@ def get_tarjetas(
         fast_mode = (mode or "").lower() == "fast"
 
         if fast_mode:
-            fast_q = q.order_by(RepairCard.id.asc())
+            # Cursor pagination must use a deterministic order aligned with cursor field.
+            # Clear inherited ordering (position/start_date) to avoid skipped/duplicated rows.
+            fast_q = q.order_by(None).order_by(RepairCard.id.asc())
             cursor_id: int | None = None
             if cursor:
                 try:

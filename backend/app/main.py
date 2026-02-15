@@ -111,11 +111,17 @@ def _fix_postgresql_sequence() -> None:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    docs_url = None if settings.is_production else "/docs"
+    redoc_url = None if settings.is_production else "/redoc"
+    openapi_url = None if settings.is_production else "/openapi.json"
     app = FastAPI(
         title="Sistema de Reparaciones - API",
         description="API para gestión de reparaciones de dispositivos electrónicos con tablero Kanban profesional",
         version="2.0.0",
         lifespan=lifespan,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
