@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense, useCallback, useRef, useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { InfiniteData } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { api } from './api/client';
 import type { TarjetaBoardItem, KanbanColumn, Tag, UserInfo, TarjetasBoardResponse, TarjetaUpdate, UserPreferences, SavedView } from './api/client';
@@ -25,6 +26,7 @@ const ExportarModal = lazy(() => import('./components/ExportarModal'));
 type ThemeMode = 'light' | 'dark';
 type ViewMode = 'kanban' | 'calendar';
 type ToastType = 'success' | 'warning' | 'info' | 'error';
+type BoardInfiniteData = InfiniteData<TarjetasBoardResponse, number>;
 
 type ReorderItem = { id: number; columna: string; posicion: number };
 type SocketEnvelope<T> = { event_version?: number; data?: T } | T;
@@ -53,33 +55,52 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   mobile_behavior: 'horizontal_swipe',
 };
 
-function applyCardPatch(data: TarjetasBoardResponse | undefined, card: TarjetaBoardItem): TarjetasBoardResponse | undefined {
+function applyCardPatch(data: BoardInfiniteData | undefined, card: TarjetaBoardItem): BoardInfiniteData | undefined {
   if (!data) return data;
-  const idx = data.tarjetas.findIndex(t => t.id === card.id);
-  if (idx === -1) {
-    return { ...data, tarjetas: [card, ...data.tarjetas] };
+  let found = false;
+  const nextPages = data.pages.map(page => {
+    const idx = page.tarjetas.findIndex(t => t.id === card.id);
+    if (idx === -1) return page;
+    found = true;
+    const nextTarjetas = [...page.tarjetas];
+    nextTarjetas[idx] = { ...nextTarjetas[idx], ...card };
+    return { ...page, tarjetas: nextTarjetas };
+  });
+  if (!found && nextPages.length > 0) {
+    const first = nextPages[0];
+    nextPages[0] = { ...first, tarjetas: [card, ...first.tarjetas] };
   }
-  const next = [...data.tarjetas];
-  next[idx] = { ...next[idx], ...card };
-  return { ...data, tarjetas: next };
+  return { ...data, pages: nextPages };
 }
 
-function removeCardPatch(data: TarjetasBoardResponse | undefined, id: number): TarjetasBoardResponse | undefined {
+function removeCardPatch(data: BoardInfiniteData | undefined, id: number): BoardInfiniteData | undefined {
   if (!data) return data;
-  return { ...data, tarjetas: data.tarjetas.filter(t => t.id !== id) };
+  return {
+    ...data,
+    pages: data.pages.map(page => ({
+      ...page,
+      tarjetas: page.tarjetas.filter(t => t.id !== id),
+    })),
+  };
 }
 
-function applyReorderPatch(data: TarjetasBoardResponse | undefined, items: ReorderItem[]): TarjetasBoardResponse | undefined {
+function applyReorderPatch(data: BoardInfiniteData | undefined, items: ReorderItem[]): BoardInfiniteData | undefined {
   if (!data || !items.length) return data;
   const byId = new Map(items.map(i => [i.id, i]));
-  const next = data.tarjetas.map(t => {
-    const upd = byId.get(t.id);
-    return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
-  });
-  return { ...data, tarjetas: next };
+  return {
+    ...data,
+    pages: data.pages.map(page => ({
+      ...page,
+      tarjetas: page.tarjetas.map(t => {
+        const upd = byId.get(t.id);
+        return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
+      }),
+    })),
+  };
 }
 
 async function fetchBoardCards(params: {
+  page?: number;
   search?: string;
   estado?: string;
   prioridad?: string;
@@ -87,13 +108,12 @@ async function fetchBoardCards(params: {
   cargador?: string;
   tag?: number;
 }): Promise<TarjetasBoardResponse> {
-  const first = await api.getTarjetasBoard({
+  return api.getTarjetasBoard({
     ...params,
-    page: 1,
+    page: params.page ?? 1,
     per_page: 120,
     includeImageThumb: true,
   });
-  return first;
 }
 
 export default function App() {
@@ -152,9 +172,19 @@ export default function App() {
     () => ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag] as const,
     [debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
   );
-  const { data: boardData, isLoading: loadingCards, isError: boardIsError, error: boardError, refetch: refetchBoard } = useQuery<TarjetasBoardResponse>({
+  const {
+    data: boardData,
+    isLoading: loadingCards,
+    isError: boardIsError,
+    error: boardError,
+    refetch: refetchBoard,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery<TarjetasBoardResponse, Error, BoardInfiniteData, typeof boardQueryKey, number>({
     queryKey: boardQueryKey,
-    queryFn: () => fetchBoardCards({
+    queryFn: ({ pageParam }) => fetchBoardCards({
+      page: pageParam,
       search: debouncedSearch || undefined,
       estado: filtros.estado || undefined,
       prioridad: filtros.prioridad || undefined,
@@ -162,12 +192,34 @@ export default function App() {
       cargador: filtros.cargador || undefined,
       tag: filtros.tag ? Number(filtros.tag) : undefined,
     }),
+    initialPageParam: 1,
+    getNextPageParam: lastPage => lastPage.pagination?.has_next ? (lastPage.pagination.page + 1) : undefined,
     refetchOnWindowFocus: false,
     staleTime: 30_000, // 30s — socket events keep data fresh between refetches
     enabled: isAuthenticated,
   });
 
-  const tarjetas = boardData?.tarjetas || [];
+  const tarjetas = useMemo(() => {
+    if (!boardData?.pages?.length) return [];
+    const merged: TarjetaBoardItem[] = [];
+    const seen = new Set<number>();
+    for (const page of boardData.pages) {
+      for (const t of page.tarjetas) {
+        if (seen.has(t.id)) continue;
+        seen.add(t.id);
+        merged.push(t);
+      }
+    }
+    return merged;
+  }, [boardData]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !hasNextPage || isFetchingNextPage) return;
+    const timer = window.setTimeout(() => {
+      fetchNextPage().catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [isAuthenticated, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],
@@ -267,7 +319,7 @@ export default function App() {
     reorderBufferRef.current = [];
     reorderTimerRef.current = null;
     if (!items.length) return;
-    qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyReorderPatch(old, items));
+    qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyReorderPatch(old, items));
   }, [qc]);
 
   useEffect(() => {
@@ -283,21 +335,21 @@ export default function App() {
     s.on('tarjeta_creada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
       const card = unwrapSocketData(payload);
       if (!card?.id) return;
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
       qc.invalidateQueries({ queryKey: ['notificaciones'] });
     });
 
     s.on('tarjeta_actualizada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
       const card = unwrapSocketData(payload);
       if (!card?.id) return;
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
       qc.invalidateQueries({ queryKey: ['notificaciones'] });
     });
 
     s.on('tarjeta_eliminada', (payload: SocketEnvelope<{ id: number }>) => {
       const data = unwrapSocketData(payload);
       if (!data?.id) return;
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => removeCardPatch(old, data.id));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => removeCardPatch(old, data.id));
     });
 
     s.on('tarjetas_reordenadas', (payload: SocketEnvelope<{ items?: ReorderItem[] }>) => {
@@ -350,7 +402,7 @@ export default function App() {
   const handleBlock = useCallback(async (id: number, reason: string) => {
     try {
       const updated = await api.blockTarjeta(id, reason);
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated));
       setToast({ msg: 'Tarjeta bloqueada', type: 'info' });
     } catch {
       setToast({ msg: 'Error al bloquear', type: 'error' });
@@ -360,7 +412,7 @@ export default function App() {
   const handleUnblock = useCallback(async (id: number) => {
     try {
       const updated = await api.unblockTarjeta(id);
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated));
       setToast({ msg: 'Tarjeta desbloqueada', type: 'success' });
     } catch {
       setToast({ msg: 'Error al desbloquear', type: 'error' });
@@ -371,7 +423,7 @@ export default function App() {
     if (!undoAction) return;
     try {
       const updated = await api.updateTarjeta(undoAction.cardId, { columna: undoAction.oldCol } as TarjetaUpdate);
-      qc.setQueriesData<TarjetasBoardResponse>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated as TarjetaBoardItem));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated as TarjetaBoardItem));
       setUndoAction(null);
       setToast({ msg: 'Movimiento deshecho', type: 'success' });
     } catch {
