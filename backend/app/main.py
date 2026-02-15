@@ -2,29 +2,38 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from fastapi.exceptions import RequestValidationError
 from starlette.middleware.gzip import GZipMiddleware
 
+from app.api.routes import auth, estadisticas, exportar, health, multimedia, tarjetas
+from app.api.routes import kanban as kanban_routes
+from app.api.routes import users as users_routes
+from app.api.routes.multimedia import executor
 from app.core.config import get_settings
+from app.core.database import Base, SessionLocal, engine
+from app.core.errors import default_code_for_status
 from app.core.limiter import limiter
 from app.core.logging_config import setup_logging
-from app.core.errors import default_code_for_status
-from app.core.database import engine, SessionLocal, Base
 from app.models import (  # noqa: F401 — register all models with Base.metadata
-    RepairCard, StatusHistory, RepairCardMedia,
-    User, UserPreference,
-    KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags,
+    Comment,
+    KanbanColumn,
+    Notification,
+    RepairCard,
+    RepairCardMedia,
+    StatusHistory,
+    SubTask,
+    Tag,
+    User,
+    UserPreference,
+    repair_card_tags,
 )
 from app.models.kanban import CardTemplate  # noqa: F401
-from app.api.routes import health, tarjetas, estadisticas, exportar, multimedia
-from app.api.routes import auth, kanban as kanban_routes, users as users_routes
-from app.api.routes.multimedia import executor
 
 
 def _setup_observability(app: FastAPI, settings) -> None:
@@ -201,7 +210,7 @@ def create_app() -> FastAPI:
     app.include_router(kanban_routes.router)
     app.include_router(users_routes.router)
 
-    from app.api.routes import metricas, actividad, plantillas
+    from app.api.routes import actividad, metricas, plantillas
     app.include_router(metricas.router)
     app.include_router(actividad.router)
     app.include_router(plantillas.router)

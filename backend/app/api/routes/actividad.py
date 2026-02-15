@@ -1,10 +1,10 @@
 """Activity feed: historial global de actividad del sistema."""
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.repair_card import StatusHistory, RepairCard
+from app.models.repair_card import RepairCard, StatusHistory
 
 router = APIRouter(prefix="/api/actividad", tags=["actividad"])
 

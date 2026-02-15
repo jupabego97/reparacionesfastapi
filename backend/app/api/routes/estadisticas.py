@@ -2,13 +2,14 @@
 
 Optimizado: queries consolidadas, caching TTL 5min.
 """
-from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import func, case
+from datetime import UTC, datetime, timedelta
 
+from fastapi import APIRouter, Depends
+from sqlalchemy import case, func
+from sqlalchemy.orm import Session
+
+from app.core.cache import DEFAULT_TTL, STATS_KEY, get_cached, set_cached
 from app.core.database import get_db
-from app.core.cache import get_cached, set_cached, STATS_KEY, DEFAULT_TTL
 from app.models.repair_card import RepairCard
 
 router = APIRouter(prefix="/api/estadisticas", tags=["estadisticas"])
@@ -31,7 +32,7 @@ def _safe_avg_days(db: Session, date_start, date_end, *filters) -> float:
 def _compute_estadisticas(db: Session) -> dict:
     not_deleted = RepairCard.deleted_at.is_(None)
     dialect = db.get_bind().dialect.name
-    hace_un_mes = datetime.now(timezone.utc) - timedelta(days=30)
+    hace_un_mes = datetime.now(UTC) - timedelta(days=30)
 
     # --- QUERY 1: Aggregates in a single pass ---
     # Counts per status + priority + charger + financial totals + notes count
@@ -103,7 +104,7 @@ def _compute_estadisticas(db: Session) -> dict:
     ).filter(not_deleted).first()
 
     # --- QUERY 5: 6-month trend ---
-    seis_meses = datetime.now(timezone.utc) - timedelta(days=180)
+    seis_meses = datetime.now(UTC) - timedelta(days=180)
     if dialect == "sqlite":
         mes_expr = func.strftime("%Y-%m", RepairCard.start_date)
     else:
@@ -140,7 +141,7 @@ def _compute_estadisticas(db: Session) -> dict:
             "total_estimado": round(float(financials.est or 0), 2),
             "total_cobrado": round(float(financials.fin or 0), 2),
         },
-        "generado_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "generado_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 

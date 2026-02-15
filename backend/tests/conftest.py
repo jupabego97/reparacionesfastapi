@@ -5,17 +5,17 @@ os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["ENVIRONMENT"] = "development"
 os.environ["ALLOW_PUBLIC_REGISTER"] = "true"
 
-import pytest
-from fastapi.testclient import TestClient
+from datetime import UTC
 
+import pytest
+from app.core.database import Base, SessionLocal, engine, get_db
 from app.main import app
-from app.core.database import Base, engine, get_db, SessionLocal
 from app.models import (
-    RepairCard, StatusHistory, User, RepairCardMedia,
-    KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags,
+    RepairCard,
+    User,
 )
-from app.models.kanban import CardTemplate
-from app.services.auth_service import hash_password, create_token
+from app.services.auth_service import create_token, hash_password
+from fastapi.testclient import TestClient
 
 
 def override_get_db():
@@ -101,15 +101,15 @@ def tech_headers(tech_user):
 @pytest.fixture
 def sample_tarjeta(db_session):
     """Create a sample repair card."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     card = RepairCard(
         owner_name="Juan Perez",
         problem="Pantalla rota",
         whatsapp_number="5551234567",
-        start_date=datetime.now(timezone.utc),
-        due_date=datetime.now(timezone.utc),
+        start_date=datetime.now(UTC),
+        due_date=datetime.now(UTC),
         status="ingresado",
-        ingresado_date=datetime.now(timezone.utc),
+        ingresado_date=datetime.now(UTC),
         has_charger="si",
         priority="media",
         position=1,

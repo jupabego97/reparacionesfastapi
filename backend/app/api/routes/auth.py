@@ -1,5 +1,5 @@
 """Rutas de autenticacion y gestion de usuarios."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -8,14 +8,14 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, UserUpdate, PasswordChange
+from app.schemas.auth import LoginRequest, PasswordChange, RegisterRequest, UserUpdate
 from app.services.auth_service import (
-    hash_password,
-    verify_password,
     create_token,
     get_current_user,
     get_current_user_optional,
+    hash_password,
     require_role,
+    verify_password,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -30,7 +30,7 @@ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Usuario desactivado")
 
-    user.last_login = datetime.now(timezone.utc)
+    user.last_login = datetime.now(UTC)
     db.commit()
 
     settings = get_settings()

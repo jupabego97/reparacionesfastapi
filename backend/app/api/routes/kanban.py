@@ -1,20 +1,25 @@
 """Rutas para gestión del tablero Kanban: columnas, tags, subtasks, comments, notificaciones."""
 import json
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.kanban import KanbanColumn, Tag, SubTask, Comment, Notification, repair_card_tags
+from app.models.kanban import Comment, KanbanColumn, Notification, SubTask, Tag, repair_card_tags
 from app.models.repair_card import RepairCard
 from app.models.user import User
 from app.schemas.kanban import (
-    ColumnCreate, ColumnUpdate, ColumnReorder,
-    TagCreate, TagUpdate,
-    SubTaskCreate, SubTaskUpdate,
-    CommentCreate, NotificationMarkRead, KanbanRules,
+    ColumnCreate,
+    ColumnReorder,
+    ColumnUpdate,
+    CommentCreate,
+    KanbanRules,
+    NotificationMarkRead,
+    SubTaskCreate,
+    SubTaskUpdate,
+    TagCreate,
+    TagUpdate,
 )
 from app.services.auth_service import get_current_user_optional, require_role
 
@@ -253,7 +258,7 @@ def update_subtask(subtask_id: int, data: SubTaskUpdate, db: Session = Depends(g
     for k, v in upd.items():
         setattr(st, k, v)
     if data.completed is True and not st.completed_at:
-        st.completed_at = datetime.now(timezone.utc)
+        st.completed_at = datetime.now(UTC)
     elif data.completed is False:
         st.completed_at = None
     st.completed = data.completed if data.completed is not None else st.completed
@@ -285,7 +290,7 @@ def create_comment(
     tarjeta_id: int,
     data: CommentCreate,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user_optional),
+    user: User | None = Depends(get_current_user_optional),
 ):
     t = db.query(RepairCard).filter(RepairCard.id == tarjeta_id).first()
     if not t:
@@ -322,9 +327,9 @@ def get_notificaciones(
 ):
     q = db.query(Notification)
     if unread_only:
-        q = q.filter(Notification.read == False)
+        q = q.filter(Notification.read.is_(False))
     items = q.order_by(Notification.created_at.desc()).limit(limit).all()
-    unread_count = db.query(Notification).filter(Notification.read == False).count()
+    unread_count = db.query(Notification).filter(Notification.read.is_(False)).count()
     return {"notifications": [n.to_dict() for n in items], "unread_count": unread_count}
 
 
@@ -337,7 +342,7 @@ def mark_read(data: NotificationMarkRead, db: Session = Depends(get_db)):
 
 @router.put("/notificaciones/mark-all-read")
 def mark_all_read(db: Session = Depends(get_db)):
-    db.query(Notification).filter(Notification.read == False).update({"read": True}, synchronize_session=False)
+    db.query(Notification).filter(Notification.read.is_(False)).update({"read": True}, synchronize_session=False)
     db.commit()
     return {"ok": True}
 

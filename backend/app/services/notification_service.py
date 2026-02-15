@@ -3,15 +3,11 @@
 Mejora #9: Notificaciones automáticas al cambiar estado.
 Mejora #20: Centro de notificaciones persistente.
 """
-from datetime import datetime, timezone
-from typing import Optional
 
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models.kanban import Notification
 from app.models.repair_card import RepairCard
-
 
 ESTADO_LABELS = {
     "ingresado": "Ingresado",
@@ -27,8 +23,8 @@ def crear_notificacion(
     title: str,
     message: str,
     type: str = "info",
-    user_id: Optional[int] = None,
-    tarjeta_id: Optional[int] = None,
+    user_id: int | None = None,
+    tarjeta_id: int | None = None,
 ) -> Notification:
     """Crea una notificación persistente."""
     notif = Notification(

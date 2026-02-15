@@ -4,7 +4,6 @@ import json
 import os
 import re
 import tempfile
-from pathlib import Path
 
 import google.generativeai as genai
 from dotenv import load_dotenv

@@ -1,90 +1,90 @@
 from datetime import date
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 
-class Prioridad(str, Enum):
+class Prioridad(StrEnum):
     alta = "alta"
     media = "media"
     baja = "baja"
 
 
 class TarjetaCreate(BaseModel):
-    nombre_propietario: Optional[str] = "Cliente"
-    problema: Optional[str] = "Sin descripción"
-    whatsapp: Optional[str] = ""
-    fecha_limite: Optional[date] = None
-    imagen_url: Optional[str] = None
-    tiene_cargador: Optional[str] = "si"
-    notas_tecnicas: Optional[str] = None
-    prioridad: Optional[Prioridad] = Prioridad.media
-    asignado_a: Optional[int] = None
-    costo_estimado: Optional[float] = Field(None, ge=0)
-    tags: Optional[list[int]] = None
+    nombre_propietario: str | None = "Cliente"
+    problema: str | None = "Sin descripción"
+    whatsapp: str | None = ""
+    fecha_limite: date | None = None
+    imagen_url: str | None = None
+    tiene_cargador: str | None = "si"
+    notas_tecnicas: str | None = None
+    prioridad: Prioridad | None = Prioridad.media
+    asignado_a: int | None = None
+    costo_estimado: float | None = Field(None, ge=0)
+    tags: list[int] | None = None
 
 
 class TarjetaUpdate(BaseModel):
-    nombre_propietario: Optional[str] = None
-    problema: Optional[str] = None
-    whatsapp: Optional[str] = None
-    fecha_limite: Optional[str] = None
-    imagen_url: Optional[str] = None
-    tiene_cargador: Optional[str] = None
-    notas_tecnicas: Optional[str] = None
-    columna: Optional[str] = None
-    prioridad: Optional[Prioridad] = None
-    posicion: Optional[int] = None
-    asignado_a: Optional[int] = None
-    costo_estimado: Optional[float] = Field(None, ge=0)
-    costo_final: Optional[float] = Field(None, ge=0)
-    notas_costo: Optional[str] = None
-    tags: Optional[list[int]] = None
+    nombre_propietario: str | None = None
+    problema: str | None = None
+    whatsapp: str | None = None
+    fecha_limite: str | None = None
+    imagen_url: str | None = None
+    tiene_cargador: str | None = None
+    notas_tecnicas: str | None = None
+    columna: str | None = None
+    prioridad: Prioridad | None = None
+    posicion: int | None = None
+    asignado_a: int | None = None
+    costo_estimado: float | None = Field(None, ge=0)
+    costo_final: float | None = Field(None, ge=0)
+    notas_costo: str | None = None
+    tags: list[int] | None = None
 
 
 class TarjetaResponse(BaseModel):
     id: int
-    nombre_propietario: Optional[str] = None
-    problema: Optional[str] = None
-    whatsapp: Optional[str] = None
-    fecha_inicio: Optional[str] = None
-    fecha_limite: Optional[str] = None
+    nombre_propietario: str | None = None
+    problema: str | None = None
+    whatsapp: str | None = None
+    fecha_inicio: str | None = None
+    fecha_limite: str | None = None
     columna: str
-    tiene_cargador: Optional[str] = None
-    fecha_diagnosticada: Optional[str] = None
-    fecha_para_entregar: Optional[str] = None
-    fecha_entregada: Optional[str] = None
-    notas_tecnicas: Optional[str] = None
-    imagen_url: Optional[str] = None
-    prioridad: Optional[str] = "media"
-    posicion: Optional[int] = 0
-    asignado_a: Optional[int] = None
-    asignado_nombre: Optional[str] = None
-    costo_estimado: Optional[float] = None
-    costo_final: Optional[float] = None
-    notas_costo: Optional[str] = None
-    eliminado: Optional[bool] = False
-    bloqueada: Optional[bool] = False
-    motivo_bloqueo: Optional[str] = None
-    tags: Optional[list[dict]] = None
-    subtasks_total: Optional[int] = 0
-    subtasks_done: Optional[int] = 0
-    comments_count: Optional[int] = 0
-    cover_thumb_url: Optional[str] = None
-    media_count: Optional[int] = 0
-    has_media: Optional[bool] = False
-    media_preview: Optional[list[dict]] = None
-    dias_en_columna: Optional[int] = 0
+    tiene_cargador: str | None = None
+    fecha_diagnosticada: str | None = None
+    fecha_para_entregar: str | None = None
+    fecha_entregada: str | None = None
+    notas_tecnicas: str | None = None
+    imagen_url: str | None = None
+    prioridad: str | None = "media"
+    posicion: int | None = 0
+    asignado_a: int | None = None
+    asignado_nombre: str | None = None
+    costo_estimado: float | None = None
+    costo_final: float | None = None
+    notas_costo: str | None = None
+    eliminado: bool | None = False
+    bloqueada: bool | None = False
+    motivo_bloqueo: str | None = None
+    tags: list[dict] | None = None
+    subtasks_total: int | None = 0
+    subtasks_done: int | None = 0
+    comments_count: int | None = 0
+    cover_thumb_url: str | None = None
+    media_count: int | None = 0
+    has_media: bool | None = False
+    media_preview: list[dict] | None = None
+    dias_en_columna: int | None = 0
 
 
 class HistorialEntry(BaseModel):
     id: int
     tarjeta_id: int
-    old_status: Optional[str] = None
+    old_status: str | None = None
     new_status: str
-    changed_at: Optional[str] = None
-    changed_by: Optional[int] = None
-    changed_by_name: Optional[str] = None
+    changed_at: str | None = None
+    changed_by: int | None = None
+    changed_by_name: str | None = None
 
 
 # --- Batch position update para drag & drop ---
@@ -106,12 +106,12 @@ class TarjetaRestore(BaseModel):
 # --- Block / Unblock ---
 class BlockRequest(BaseModel):
     blocked: bool = True
-    reason: Optional[str] = Field(None, max_length=500)
-    user_id: Optional[int] = None
+    reason: str | None = Field(None, max_length=500)
+    user_id: int | None = None
 
 
 # --- Batch operations ---
-class BatchAction(str, Enum):
+class BatchAction(StrEnum):
     move = "move"
     assign = "assign"
     tag = "tag"
@@ -122,9 +122,9 @@ class BatchAction(str, Enum):
 class BatchOperationRequest(BaseModel):
     ids: list[int] = Field(min_length=1)
     action: BatchAction
-    value: Optional[str] = None
-    user_name: Optional[str] = None
-    assign_name: Optional[str] = None
+    value: str | None = None
+    user_name: str | None = None
+    assign_name: str | None = None
 
 
 # --- Media reorder ---

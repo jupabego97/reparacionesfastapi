@@ -1,5 +1,7 @@
-from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, Boolean, ForeignKey
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Text
+
 from app.core.database import Base
 
 
@@ -14,7 +16,7 @@ class User(Base):
     role = Column(Text, nullable=False, default="tecnico", index=True)  # admin, tecnico, recepcion
     is_active = Column(Boolean, nullable=False, default=True)
     avatar_color = Column(Text, nullable=True, default="#00ACC1")
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
     last_login = Column(DateTime, nullable=True)
 
     def to_dict(self) -> dict:
@@ -37,4 +39,4 @@ class UserPreference(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     preferences_json = Column(Text, nullable=False, default="{}")
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))

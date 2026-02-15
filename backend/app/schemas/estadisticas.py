@@ -1,4 +1,4 @@
-from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -14,7 +14,7 @@ class TasaCargador(BaseModel):
 
 
 class TendenciaMes(BaseModel):
-    mes: Optional[str]
+    mes: str | None
     total: int
 
 

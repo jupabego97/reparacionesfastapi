@@ -3,35 +3,33 @@
 Mejoras integradas: prioridad, posición, asignación, notificaciones,
 costos, búsqueda server-side, S3 storage, soft delete, SQLite compat.
 """
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session, defer
-from sqlalchemy import func, text, or_, exists, and_, select, insert, delete
+from sqlalchemy import and_, delete, exists, func, insert, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from loguru import logger
+from sqlalchemy.orm import Session, defer
 
+from app.core.cache import invalidate_stats
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.core.cache import invalidate_stats
-from app.models.repair_card import RepairCard, StatusHistory, RepairCardMedia
-from app.models.kanban import SubTask, Comment, Tag, repair_card_tags, KanbanColumn
+from app.models.kanban import Comment, KanbanColumn, SubTask, Tag, repair_card_tags
+from app.models.repair_card import RepairCard, RepairCardMedia, StatusHistory
 from app.models.user import User
 from app.schemas.tarjeta import (
-    TarjetaCreate,
-    TarjetaUpdate,
+    BatchOperationRequest,
     BatchPosicionUpdate,
     BlockRequest,
-    BatchOperationRequest,
     MediaReorderRequest,
+    TarjetaCreate,
+    TarjetaUpdate,
 )
-from app.socket_events import sio
 from app.services.auth_service import get_current_user, get_current_user_optional, require_role
 from app.services.notification_service import notificar_cambio_estado
 from app.services.storage_service import get_storage_service
+from app.socket_events import sio
 
 router = APIRouter(prefix="/api/tarjetas", tags=["tarjetas"])
 
@@ -51,14 +49,14 @@ _STATUS_DATE_FIELDS = {
 
 def _calcular_dias_en_columna(card: RepairCard) -> int:
     """Calculate days a card has been in its current column."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     field = _STATUS_DATE_FIELDS.get(card.status)
     if field:
         dt = getattr(card, field, None)
         if dt:
             # Handle both naive and aware datetimes from DB
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return (now - dt).days
     return 0
 
@@ -66,11 +64,11 @@ def _calcular_dias_en_columna(card: RepairCard) -> int:
 def _apply_status_transition(card: RepairCard, new_status: str) -> None:
     """Apply date fields for a status transition."""
     if new_status == "diagnosticada" and not card.diagnosticada_date:
-        card.diagnosticada_date = datetime.now(timezone.utc)
+        card.diagnosticada_date = datetime.now(UTC)
     elif new_status == "para_entregar" and not card.para_entregar_date:
-        card.para_entregar_date = datetime.now(timezone.utc)
+        card.para_entregar_date = datetime.now(UTC)
     elif new_status == "listos" and not card.entregados_date:
-        card.entregados_date = datetime.now(timezone.utc)
+        card.entregados_date = datetime.now(UTC)
 
 
 def _get_valid_statuses(db: Session) -> list[str]:
@@ -392,7 +390,7 @@ async def create_tarjeta(
     request: Request,
     data: TarjetaCreate,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user_optional),
+    user: User | None = Depends(get_current_user_optional),
 ):
     settings = get_settings()
     nombre = (data.nombre_propietario or "").strip() or "Cliente"
@@ -400,7 +398,7 @@ async def create_tarjeta(
     whatsapp = (data.whatsapp or "").strip() or ""
     fecha_limite = data.fecha_limite
     if not fecha_limite:
-        due_dt = datetime.now(timezone.utc) + timedelta(days=1)
+        due_dt = datetime.now(UTC) + timedelta(days=1)
     else:
         from datetime import time
         due_dt = datetime.combine(fecha_limite, time.min)
@@ -431,10 +429,10 @@ async def create_tarjeta(
         owner_name=nombre,
         problem=problema,
         whatsapp_number=whatsapp,
-        start_date=datetime.now(timezone.utc),
+        start_date=datetime.now(UTC),
         due_date=due_dt,
         status="ingresado",
-        ingresado_date=datetime.now(timezone.utc),
+        ingresado_date=datetime.now(UTC),
         image_url=imagen_url,
         has_charger=data.tiene_cargador or "si",
         priority=data.prioridad or "media",
@@ -459,11 +457,11 @@ async def create_tarjeta(
                 db.add(t)
                 db.commit()
                 db.refresh(t)
-            except Exception:
+            except Exception as exc:
                 db.rollback()
-                raise HTTPException(status_code=500, detail="Error de secuencia de IDs")
+                raise HTTPException(status_code=500, detail="Error de secuencia de IDs") from exc
         else:
-            raise HTTPException(status_code=500, detail="Error de integridad al crear tarjeta")
+            raise HTTPException(status_code=500, detail="Error de integridad al crear tarjeta") from e
 
     if data.tags:
         for tag_id in data.tags:
@@ -501,7 +499,7 @@ async def update_tarjeta(
     id: int,
     data: TarjetaUpdate,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user_optional),
+    user: User | None = Depends(get_current_user_optional),
 ):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
@@ -568,7 +566,7 @@ async def update_tarjeta(
                 tarjeta_id=t.id,
                 old_status=old_status,
                 new_status=nuevo,
-                changed_at=datetime.now(timezone.utc),
+                changed_at=datetime.now(UTC),
                 changed_by=user.id if user else None,
                 changed_by_name=user.full_name if user else None,
             ))
@@ -617,7 +615,7 @@ async def batch_update_positions(
 
                 db.add(StatusHistory(
                     tarjeta_id=t.id, old_status=old_status, new_status=item.columna,
-                    changed_at=datetime.now(timezone.utc),
+                    changed_at=datetime.now(UTC),
                     changed_by=user.id,
                     changed_by_name=user.full_name,
                 ))
@@ -653,7 +651,7 @@ async def batch_operations(
             _apply_status_transition(t, data.value)
             db.add(StatusHistory(
                 tarjeta_id=t.id, old_status=old_status, new_status=data.value,
-                changed_at=datetime.now(timezone.utc),
+                changed_at=datetime.now(UTC),
                 changed_by=user.id,
                 changed_by_name=data.user_name or user.full_name,
             ))
@@ -663,7 +661,7 @@ async def batch_operations(
         elif data.action == "priority" and data.value:
             t.priority = data.value
         elif data.action == "delete":
-            t.deleted_at = datetime.now(timezone.utc)
+            t.deleted_at = datetime.now(UTC)
         elif data.action == "tag" and data.value is not None:
             existing = db.execute(
                 select(repair_card_tags.c.tag_id).where(
@@ -703,7 +701,7 @@ async def delete_tarjeta(
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
-    t.deleted_at = datetime.now(timezone.utc)
+    t.deleted_at = datetime.now(UTC)
     db.commit()
     invalidate_stats()
     try:
@@ -978,7 +976,7 @@ def delete_tarjeta_media(
     ).first()
     if not m:
         raise HTTPException(status_code=404, detail="Media no encontrada")
-    m.deleted_at = datetime.now(timezone.utc)
+    m.deleted_at = datetime.now(UTC)
     if m.storage_key:
         storage = get_storage_service()
         if storage.use_s3 and storage._client:
@@ -1014,7 +1012,7 @@ async def block_tarjeta(
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
     if data.blocked:
-        t.blocked_at = datetime.now(timezone.utc)
+        t.blocked_at = datetime.now(UTC)
         t.blocked_reason = data.reason or ""
         t.blocked_by = data.user_id or user.id
     else:

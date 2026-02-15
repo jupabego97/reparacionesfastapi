@@ -1,7 +1,7 @@
 """CRUD de plantillas de tarjetas reutilizables."""
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.kanban import CardTemplate
@@ -44,9 +44,9 @@ def create_template(data: TemplateCreate, db: Session = Depends(get_db)):
     try:
         db.commit()
         db.refresh(t)
-    except Exception:
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Template name already exists")
+        raise HTTPException(status_code=400, detail="Template name already exists") from exc
     return t.to_dict()
 
 

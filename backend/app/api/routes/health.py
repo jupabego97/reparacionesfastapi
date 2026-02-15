@@ -1,13 +1,14 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import text, inspect as sa_inspect
 from loguru import logger
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.core.config import get_settings
+from app.core.database import get_db
 from app.services.gemini_service import get_gemini_service
 
 router = APIRouter(tags=["health"])
@@ -18,7 +19,7 @@ def health_check(db: Session = Depends(get_db)):
     settings = get_settings()
     health_status = {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "services": {},
         "environment": settings.environment,
     }
@@ -40,19 +41,19 @@ def health_check(db: Session = Depends(get_db)):
 
 @router.get("/health/live")
 def liveness():
-    return {"status": "alive", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "alive", "timestamp": datetime.now(UTC).isoformat()}
 
 
 @router.get("/health/ready")
 def readiness(db: Session = Depends(get_db)):
     try:
         db.scalar(text("SELECT 1"))
-        return {"status": "ready", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {"status": "ready", "timestamp": datetime.now(UTC).isoformat()}
     except Exception as e:
         logger.error(f"Readiness DB failure: {e}")
         return JSONResponse(
             status_code=503,
-            content={"status": "not_ready", "timestamp": datetime.now(timezone.utc).isoformat()},
+            content={"status": "not_ready", "timestamp": datetime.now(UTC).isoformat()},
         )
 
 

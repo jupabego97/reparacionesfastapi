@@ -1,5 +1,5 @@
 """Schemas para modelos Kanban adicionales."""
-from typing import Optional, List
+
 from pydantic import BaseModel, Field
 
 
@@ -7,49 +7,49 @@ from pydantic import BaseModel, Field
 class ColumnCreate(BaseModel):
     key: str = Field(..., min_length=2, max_length=50)
     title: str = Field(..., min_length=1, max_length=100)
-    color: Optional[str] = "#0369a1"
-    icon: Optional[str] = "fas fa-inbox"
-    position: Optional[int] = 0
-    wip_limit: Optional[int] = None
-    is_done_column: Optional[bool] = False
+    color: str | None = "#0369a1"
+    icon: str | None = "fas fa-inbox"
+    position: int | None = 0
+    wip_limit: int | None = None
+    is_done_column: bool | None = False
 
 
 class ColumnUpdate(BaseModel):
-    title: Optional[str] = None
-    color: Optional[str] = None
-    icon: Optional[str] = None
-    position: Optional[int] = None
-    wip_limit: Optional[int] = None
-    is_done_column: Optional[bool] = None
+    title: str | None = None
+    color: str | None = None
+    icon: str | None = None
+    position: int | None = None
+    wip_limit: int | None = None
+    is_done_column: bool | None = None
 
 
 class ColumnReorder(BaseModel):
-    columns: List[dict]  # [{id: 1, position: 0}, ...]
+    columns: list[dict]  # [{id: 1, position: 0}, ...]
 
 
 # --- Tags ---
 class TagCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
-    color: Optional[str] = "#6366f1"
-    icon: Optional[str] = None
+    color: str | None = "#6366f1"
+    icon: str | None = None
 
 
 class TagUpdate(BaseModel):
-    name: Optional[str] = None
-    color: Optional[str] = None
-    icon: Optional[str] = None
+    name: str | None = None
+    color: str | None = None
+    icon: str | None = None
 
 
 # --- Sub-tareas ---
 class SubTaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
-    position: Optional[int] = 0
+    position: int | None = 0
 
 
 class SubTaskUpdate(BaseModel):
-    title: Optional[str] = None
-    completed: Optional[bool] = None
-    position: Optional[int] = None
+    title: str | None = None
+    completed: bool | None = None
+    position: int | None = None
 
 
 # --- Comentarios ---
@@ -59,7 +59,7 @@ class CommentCreate(BaseModel):
 
 # --- Notificaciones ---
 class NotificationMarkRead(BaseModel):
-    ids: List[int]
+    ids: list[int]
 
 
 class KanbanRules(BaseModel):

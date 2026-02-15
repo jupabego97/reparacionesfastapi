@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey, Float, Index, Boolean
-from sqlalchemy.orm import relationship
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, Text
 
 from app.core.database import Base
 
@@ -96,7 +96,7 @@ class StatusHistory(Base):
     tarjeta_id = Column(Integer, ForeignKey("repair_cards.id", ondelete="CASCADE"), nullable=False, index=True)
     old_status = Column(Text, nullable=True)
     new_status = Column(Text, nullable=False)
-    changed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    changed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True)
     changed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     changed_by_name = Column(Text, nullable=True)
 
@@ -127,7 +127,7 @@ class RepairCardMedia(Base):
     is_cover = Column(Boolean, nullable=False, default=False)
     mime_type = Column(Text, nullable=True)
     size_bytes = Column(Integer, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
 
     def to_dict(self) -> dict:

@@ -1,5 +1,5 @@
 """Schemas para autenticación."""
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -12,9 +12,9 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=4, max_length=128)
     full_name: str = Field(default="Usuario", max_length=100)
-    email: Optional[str] = None
-    role: Optional[str] = "tecnico"
-    avatar_color: Optional[str] = "#00ACC1"
+    email: str | None = None
+    role: str | None = "tecnico"
+    avatar_color: str | None = "#00ACC1"
 
 
 class TokenResponse(BaseModel):
@@ -24,11 +24,11 @@ class TokenResponse(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[str] = None
-    avatar_color: Optional[str] = None
-    role: Optional[str] = None
-    is_active: Optional[bool] = None
+    full_name: str | None = None
+    email: str | None = None
+    avatar_color: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
 
 
 class PasswordChange(BaseModel):

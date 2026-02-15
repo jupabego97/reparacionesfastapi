@@ -2,13 +2,14 @@
 
 Optimizado: queries batch en vez de O(N*M), cálculos en DB en vez de Python.
 """
-from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func, case, and_, literal_column
+from datetime import UTC, datetime, timedelta
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.core.cache import get_cached, set_cached
+from app.core.database import get_db
 from app.models.repair_card import RepairCard, StatusHistory
 
 router = APIRouter(prefix="/api/metricas", tags=["metricas"])
@@ -28,7 +29,7 @@ def get_kanban_metrics(
     if cached is not None:
         return cached
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     desde = now - timedelta(days=dias)
     dialect = db.get_bind().dialect.name
 
@@ -126,7 +127,6 @@ def get_kanban_metrics(
 
     # Historical CFD: batch query grouping StatusHistory by date + status
     sample_days = min(dias, 60)
-    step = max(1, sample_days // 30)
     cfd_since = now - timedelta(days=sample_days)
 
     if dialect == "sqlite":
