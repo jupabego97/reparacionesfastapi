@@ -156,10 +156,12 @@ def get_kanban_metrics(
             cfd_by_day[day_str] = {s: 0 for s in statuses}
         cfd_by_day[day_str][row.new_status] = row.cnt
 
-    cfd_data = [{"fecha": day, **counts} for day, counts in cfd_by_day.items()]
+    cfd_data: list[dict[str, str | int]] = [
+        {"fecha": day, **counts} for day, counts in cfd_by_day.items()
+    ]
 
     # Add current point
-    current_point = {"fecha": now.strftime("%d/%m")}
+    current_point: dict[str, str | int] = {"fecha": now.strftime("%d/%m")}
     for status in statuses:
         current_point[status] = current_map.get(status, 0)
     cfd_data.append(current_point)

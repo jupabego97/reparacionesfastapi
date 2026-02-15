@@ -17,23 +17,24 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 def health_check(db: Session = Depends(get_db)):
     settings = get_settings()
-    health_status = {
+    services: dict[str, str] = {}
+    health_status: dict[str, object] = {
         "status": "healthy",
         "timestamp": datetime.now(UTC).isoformat(),
-        "services": {},
+        "services": services,
         "environment": settings.environment,
     }
 
     try:
         db.scalar(text("SELECT 1"))
-        health_status["services"]["database"] = "healthy"
+        services["database"] = "healthy"
     except Exception as e:
         logger.error(f"Error en health check de BD: {e}")
-        health_status["services"]["database"] = "unhealthy"
+        services["database"] = "unhealthy"
         health_status["status"] = "degraded"
 
     gemini = get_gemini_service()
-    health_status["services"]["gemini_ai"] = "healthy" if gemini else "unavailable"
+    services["gemini_ai"] = "healthy" if gemini else "unavailable"
 
     status_code = 200 if health_status["status"] == "healthy" else 503
     return JSONResponse(content=health_status, status_code=status_code)

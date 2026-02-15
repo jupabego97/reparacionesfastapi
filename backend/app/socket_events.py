@@ -7,6 +7,7 @@ settings = get_settings()
 transports = ["polling"] if settings.socketio_safe_mode else ["websocket", "polling"]
 origins, origin_regex = settings.get_cors_origins()
 # Socket.IO no soporta regex; usa lista explícita o "*"
+cors_sio: list[str] | str
 if origin_regex:
     logger.info(f"CORS fallback: regex {origin_regex} (Socket.IO requerirá ALLOWED_ORIGINS explícito)")
     cors_sio = "*"  # No funciona con credenciales; ALLOWED_ORIGINS recomendado para Socket.IO

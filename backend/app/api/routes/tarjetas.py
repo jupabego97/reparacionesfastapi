@@ -335,8 +335,8 @@ def get_tarjetas(
 
     if page is None and per_page is None:
         items = q.all()
-        data = _enrich_batch(items, db, include_image=include_image)
-        return JSONResponse(content=data, headers=CACHE_HEADERS)
+        all_data = _enrich_batch(items, db, include_image=include_image)
+        return JSONResponse(content=all_data, headers=CACHE_HEADERS)
 
     per_page = min(per_page or 50, 100)
     page = page or 1

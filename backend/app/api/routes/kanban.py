@@ -84,10 +84,10 @@ def update_kanban_rules(
         col = by_key.get(key)
         if col:
             col.sla_hours = value
-    for key, value in data.transition_requirements.items():
+    for key, fields in data.transition_requirements.items():
         col = by_key.get(key)
         if col:
-            col.required_fields = json.dumps(value, ensure_ascii=True)
+            col.required_fields = json.dumps(fields, ensure_ascii=True)
     db.commit()
     return get_kanban_rules(db)
 
