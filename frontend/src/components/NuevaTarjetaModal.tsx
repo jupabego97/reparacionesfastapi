@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, UserInfo, TarjetaCreate } from '../api/client';
 
@@ -14,7 +14,6 @@ function defaultTomorrowDate(): string {
 }
 
 export default function NuevaTarjetaModal({ onClose }: Props) {
-  const qc = useQueryClient();
   const [step, setStep] = useState<'capture' | 'form'>('capture');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -45,7 +44,6 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
 
   const createMut = useMutation({
     mutationFn: (data: TarjetaCreate) => api.createTarjeta(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
     onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Error al crear'),
   });
 
@@ -141,7 +139,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
       whatsapp: form.whatsapp.trim(),
       fecha_limite: form.fecha_limite,
       tiene_cargador: form.tiene_cargador,
-      imagen_url: form.imagen_url || undefined,
+      imagen_url: photoFiles.length > 0 ? undefined : (form.imagen_url || undefined),
       prioridad: form.prioridad,
       asignado_a: form.asignado_a ? Number(form.asignado_a) : undefined,
       costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : undefined,
@@ -158,7 +156,6 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
           setError('Tarjeta creada, pero algunas fotos no se pudieron subir');
         }
       }
-      qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
       onClose();
     } catch {
       setUploadState('idle');

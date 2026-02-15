@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef } from 'react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { api } from '../api/client';
 import type { TarjetaBoardItem, KanbanColumn } from '../api/client';
@@ -120,7 +120,6 @@ export default function KanbanBoard({
   onBlock,
   onUnblock,
 }: Props) {
-  const qc = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const sensors = useSensors(
@@ -138,12 +137,10 @@ export default function KanbanBoard({
 
   const batchMutation = useMutation({
     mutationFn: (items: { id: number; columna: string; posicion: number }[]) => api.batchUpdatePositions(items),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarjetas-board'] }),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.deleteTarjeta(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarjetas-board'] }),
   });
 
   const tarjetasPorColumna = useMemo(() => {

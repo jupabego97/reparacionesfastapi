@@ -15,7 +15,7 @@ from app.core.config import get_settings
 class StorageService:
     def __init__(self):
         settings = get_settings()
-        self.use_s3 = settings.use_s3_storage and settings.s3_bucket
+        self.use_s3 = bool(settings.use_s3_storage and settings.s3_bucket)
         self._client = None
 
         if self.use_s3:

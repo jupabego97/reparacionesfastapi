@@ -228,8 +228,6 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
             "whatsapp": item.get("whatsapp"),
             "fecha_limite": item.get("fecha_limite"),
             "tiene_cargador": item.get("tiene_cargador"),
-            "notas_tecnicas": item.get("notas_tecnicas"),
-            "costo_estimado": item.get("costo_estimado"),
             "dias_en_columna": item.get("dias_en_columna", 0),
             "subtasks_total": item.get("subtasks_total", 0),
             "subtasks_done": item.get("subtasks_done", 0),
@@ -315,18 +313,21 @@ def get_tarjetas(
     q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
 
     if board_mode:
-        per_page = min(per_page or 200, 500)
+        per_page = min(per_page or 120, 200)
         page = page or 1
-        total = q.order_by(None).count()
-        items = q.offset((page - 1) * per_page).limit(per_page).all()
+        page_items = q.offset((page - 1) * per_page).limit(per_page + 1).all()
+        has_next = len(page_items) > per_page
+        items = page_items[:per_page]
+        # Evita count() pesado en cada carga del board. Se calcula de forma perezosa en otras vistas.
+        total = None
         data = {
             "tarjetas": _serialize_board_items(items, db, include_image=include_image),
             "pagination": {
                 "page": page,
                 "per_page": per_page,
                 "total": total,
-                "pages": (total + per_page - 1) // per_page if per_page else 0,
-                "has_next": page * per_page < total,
+                "pages": None,
+                "has_next": has_next,
                 "has_prev": page > 1,
             },
             "view": "board",

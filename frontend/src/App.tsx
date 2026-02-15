@@ -90,7 +90,7 @@ async function fetchBoardCards(params: {
   const first = await api.getTarjetasBoard({
     ...params,
     page: 1,
-    per_page: 200,
+    per_page: 120,
     includeImageThumb: true,
   });
   return first;
@@ -168,40 +168,6 @@ export default function App() {
   });
 
   const tarjetas = boardData?.tarjetas || [];
-
-  useEffect(() => {
-    if (!isAuthenticated || !boardData?.pagination?.has_next) return;
-    let cancelled = false;
-    const baseParams = {
-      search: debouncedSearch || undefined,
-      estado: filtros.estado || undefined,
-      prioridad: filtros.prioridad || undefined,
-      asignado_a: filtros.asignado_a ? Number(filtros.asignado_a) : undefined,
-      cargador: filtros.cargador || undefined,
-      tag: filtros.tag ? Number(filtros.tag) : undefined,
-    };
-    const perPage = boardData.pagination.per_page || 200;
-    const pages = boardData.pagination.pages || 1;
-    (async () => {
-      for (let page = 2; page <= pages; page += 1) {
-        if (cancelled) return;
-        try {
-          const nextPage = await api.getTarjetasBoard({ ...baseParams, page, per_page: perPage, includeImageThumb: true });
-          if (cancelled) return;
-          qc.setQueryData<TarjetasBoardResponse>(boardQueryKey, old => {
-            if (!old) return nextPage;
-            const existingIds = new Set(old.tarjetas.map(t => t.id));
-            const appended = nextPage.tarjetas.filter(t => !existingIds.has(t.id));
-            if (!appended.length) return old;
-            return { ...old, tarjetas: [...old.tarjetas, ...appended] };
-          });
-        } catch {
-          return;
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isAuthenticated, boardData?.pagination?.has_next, boardData?.pagination?.pages, boardData?.pagination?.per_page, debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag, qc, boardQueryKey]);
 
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],
@@ -308,7 +274,7 @@ export default function App() {
     if (!isAuthenticated) return;
 
     const url = API_BASE || window.location.origin;
-    const s = io(url, { transports: ['polling', 'websocket'], reconnection: true });
+    const s = io(url, { transports: ['websocket', 'polling'], reconnection: true });
 
     s.on('connect', () => setConnStatus('connected'));
     s.on('disconnect', () => setConnStatus('disconnected'));
@@ -338,7 +304,6 @@ export default function App() {
       const data = unwrapSocketData(payload);
       const items = data?.items;
       if (!Array.isArray(items) || !items.length) {
-        qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
         return;
       }
       reorderBufferRef.current.push(...items);
@@ -595,7 +560,6 @@ export default function App() {
           onDone={() => {
             setSelectedIds([]);
             setSelectMode(false);
-            qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
             setToast({ msg: 'Operacion en lote completada', type: 'success' });
           }}
         />

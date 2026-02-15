@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     allowed_origins: str = ""
     gemini_api_key: str = ""
-    socketio_safe_mode: bool = True
+    socketio_safe_mode: bool = False
     redis_url: str | None = None
 
     # --- Auth (Mejora #6) ---

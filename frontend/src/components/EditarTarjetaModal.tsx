@@ -95,9 +95,8 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
 
   const updateMut = useMutation({
     mutationFn: (data: TarjetaUpdate) => api.updateTarjeta(tarjetaId, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
-      qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
+    onSuccess: (updated) => {
+      qc.setQueryData(['tarjeta-detail', tarjetaId], updated);
       onClose();
     },
   });
@@ -105,7 +104,6 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   const deleteMut = useMutation({
     mutationFn: () => api.deleteTarjeta(tarjetaId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
       onClose();
     },
   });
@@ -132,16 +130,16 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   });
   const uploadMediaMut = useMutation({
     mutationFn: (files: File[]) => api.uploadTarjetaMedia(tarjetaId, files),
-    onSuccess: () => { refetchMedia(); qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
+    onSuccess: () => { refetchMedia(); },
     onError: (e: unknown) => setPhotoError(e instanceof Error ? e.message : 'Error subiendo fotos'),
   });
   const deleteMediaMut = useMutation({
     mutationFn: (mediaId: number) => api.deleteTarjetaMedia(tarjetaId, mediaId),
-    onSuccess: () => { refetchMedia(); qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
+    onSuccess: () => { refetchMedia(); },
   });
   const coverMediaMut = useMutation({
     mutationFn: (mediaId: number) => api.updateTarjetaMedia(tarjetaId, mediaId, { is_cover: true }),
-    onSuccess: () => { refetchMedia(); qc.invalidateQueries({ queryKey: ['tarjetas-board'] }); },
+    onSuccess: () => { refetchMedia(); },
   });
   const reorderMediaMut = useMutation({
     mutationFn: (items: { id: number; position: number }[]) => api.reorderTarjetaMedia(tarjetaId, items),
