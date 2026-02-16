@@ -111,7 +111,7 @@ async function fetchBoardCards(params: {
   return api.getTarjetasBoard({
     ...params,
     mode: 'fast',
-    per_page: 120,
+    per_page: 200,
     includeImageThumb: true,
   });
 }
@@ -217,7 +217,7 @@ export default function App() {
     if (!isAuthenticated || !hasNextPage || isFetchingNextPage) return;
     const timer = window.setTimeout(() => {
       fetchNextPage().catch(() => undefined);
-    }, 250);
+    }, 50);
     return () => window.clearTimeout(timer);
   }, [isAuthenticated, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
