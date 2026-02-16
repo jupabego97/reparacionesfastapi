@@ -13,6 +13,8 @@ interface Props {
   onSelect?: (id: number) => void;
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
+  dragHandleProps?: Record<string, unknown>;
+  isDragging?: boolean;
 }
 
 const PRIORITY_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
@@ -33,7 +35,7 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
-function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect }: Props) {
+function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect, dragHandleProps, isDragging }: Props) {
   const t = tarjeta;
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
@@ -54,13 +56,16 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
     const compactThumb = t.cover_thumb_url || t.imagen_url || '';
     return (
       <div
-        className={`tarjeta-card compact ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''}`}
+        className={`tarjeta-card compact ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''} ${isDragging ? 'dragging' : ''}`}
         onClick={() => onEdit(t)}
         tabIndex={0}
         role="button"
         onKeyDown={e => { if (e.key === 'Enter') onEdit(t); }}
       >
         <div className="tarjeta-compact-row">
+          {dragHandleProps && (
+            <span className="drag-handle-compact" {...dragHandleProps} onClick={e => e.stopPropagation()}><i className="fas fa-grip-vertical"></i></span>
+          )}
           {compactThumb && (
             <img src={compactThumb} alt="Equipo" className="tarjeta-compact-thumb" loading="lazy" />
           )}
@@ -70,6 +75,20 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           <div className="tarjeta-compact-actions">
             {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
             {whatsUrl && <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-sm" onClick={e => e.stopPropagation()} title="WhatsApp"><i className="fab fa-whatsapp"></i></a>}
+            <div className="tarjeta-compact-arrows">
+              {prevCol && (
+                <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
+                  title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}>
+                  <i className="fas fa-chevron-left"></i>
+                </button>
+              )}
+              {nextCol && (
+                <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
+                  title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}>
+                  <i className="fas fa-chevron-right"></i>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -78,7 +97,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
 
   return (
     <div
-      className={`tarjeta-card ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''} ${selected ? 'card-selected' : ''}`}
+      className={`tarjeta-card ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''} ${selected ? 'card-selected' : ''} ${isDragging ? 'dragging' : ''}`}
       tabIndex={0}
       role="button"
       aria-label={`Tarjeta de ${t.nombre_propietario || 'Cliente'}`}
@@ -91,6 +110,12 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
       }}
     >
       <div className="priority-strip" style={{ background: isBlocked ? '#ef4444' : prio.color }}></div>
+
+      {dragHandleProps && (
+        <div className="drag-handle" {...dragHandleProps} aria-label="Arrastrar tarjeta">
+          <i className="fas fa-grip-vertical"></i>
+        </div>
+      )}
 
       {selectable && (
         <div className="card-checkbox" onClick={e => { e.stopPropagation(); onSelect?.(t.id); }}>

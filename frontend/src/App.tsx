@@ -602,7 +602,9 @@ export default function App() {
             <KanbanBoard columnas={columnas} tarjetas={tarjetas}
               onEdit={t => setEditCardId(t.id)} groupBy={groupBy} compactView={compactView}
               selectable={selectMode} selectedIds={selectedIds} onSelect={toggleSelect}
-              onBlock={handleBlock} onUnblock={handleUnblock} />
+              onBlock={handleBlock} onUnblock={handleUnblock}
+              onMoveError={() => setToast({ msg: 'Error al mover tarjeta', type: 'error' })}
+              onMoveSuccess={() => {}} />
           )}
         </>
       ) : (

@@ -584,9 +584,11 @@ body {
 }
 
 .kanban-column.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(0, 172, 193, 0.3);
-  background: rgba(0, 172, 193, 0.04);
+  background: var(--accent-light);
   animation: dragOverPulse 1.5s ease-in-out infinite;
 }
 
@@ -718,7 +720,7 @@ body {
 }
 
 .tarjeta-header {
-  padding: 0.75rem 0.75rem 0.4rem 1rem;
+  padding: 0.75rem 0.75rem 0.4rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -996,8 +998,8 @@ body {
 }
 
 .btn-col-arrow {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 44px;
+  min-height: 44px;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-xs);
   font-size: 0.75rem;
@@ -1010,6 +1012,10 @@ body {
   border-color: var(--accent) !important;
   background: var(--accent-light);
   color: var(--accent);
+}
+
+.btn-col-arrow:active {
+  transform: scale(0.92);
 }
 
 /* Compact card */
@@ -1053,6 +1059,76 @@ body {
 .tag-count {
   font-size: 0.65rem;
   color: var(--text-muted);
+}
+
+/* Drag handle */
+.drag-handle {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 20px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-muted);
+  opacity: 0.3;
+  touch-action: none;
+  z-index: 1;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.drag-handle:hover,
+.drag-handle:active {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle-compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-muted);
+  opacity: 0.3;
+  touch-action: none;
+  padding: 0.2rem;
+  flex-shrink: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.drag-handle-compact:hover,
+.drag-handle-compact:active {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.drag-handle-compact:active {
+  cursor: grabbing;
+}
+
+/* Compact arrows container */
+.tarjeta-compact-arrows {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.btn-col-arrow-sm {
+  min-width: 28px !important;
+  min-height: 28px !important;
+  padding: 0.15rem !important;
+  font-size: 0.65rem !important;
+}
+
+/* Dragging state */
+.tarjeta-card.dragging {
+  opacity: 0.6;
 }
 
 /* Drag overlay */
@@ -2024,7 +2100,7 @@ body {
     gap: 0.5rem;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
+    touch-action: manipulation;
     overscroll-behavior-x: contain;
     scroll-padding-inline: 0.5rem;
     /* Space for FAB at bottom */

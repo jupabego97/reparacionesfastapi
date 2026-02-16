@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { api } from '../api/client';
 import type { TarjetaBoardItem, KanbanColumn } from '../api/client';
@@ -20,6 +20,8 @@ interface Props {
   onSelect?: (id: number) => void;
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
+  onMoveSuccess?: () => void;
+  onMoveError?: () => void;
 }
 
 const PRIORITY_LABELS: Record<string, string> = { alta: 'Alta', media: 'Media', baja: 'Baja' };
@@ -119,14 +121,17 @@ export default function KanbanBoard({
   onSelect,
   onBlock,
   onUnblock,
+  onMoveSuccess,
+  onMoveError,
 }: Props) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const [visibleColIndex, setVisibleColIndex] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const queryClient = useQueryClient();
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } }),
   );
 
   const tarjetaById = useMemo(() => {
@@ -139,6 +144,43 @@ export default function KanbanBoard({
 
   const batchMutation = useMutation({
     mutationFn: (items: { id: number; columna: string; posicion: number }[]) => api.batchUpdatePositions(items),
+    onMutate: async (items) => {
+      await queryClient.cancelQueries({ queryKey: ['tarjetas-board'] });
+      const snapshot = queryClient.getQueriesData({ queryKey: ['tarjetas-board'] });
+      // Optimistic update: apply position/column changes immediately
+      queryClient.setQueriesData<unknown>({ queryKey: ['tarjetas-board'] }, (old: unknown) => {
+        if (!old || typeof old !== 'object') return old;
+        const data = old as { pages: { tarjetas: TarjetaBoardItem[] }[] };
+        if (!data.pages) return old;
+        const byId = new Map(items.map(i => [i.id, i]));
+        return {
+          ...data,
+          pages: data.pages.map((page: { tarjetas: TarjetaBoardItem[] }) => ({
+            ...page,
+            tarjetas: page.tarjetas.map((t: TarjetaBoardItem) => {
+              const upd = byId.get(t.id);
+              return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
+            }),
+          })),
+        };
+      });
+      return { snapshot };
+    },
+    onError: (_err, _items, context) => {
+      // Rollback to snapshot
+      if (context?.snapshot) {
+        for (const [key, data] of context.snapshot) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      onMoveError?.();
+    },
+    onSuccess: () => {
+      onMoveSuccess?.();
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tarjetas-board'] });
+    },
   });
 
   const deleteMutation = useMutation({

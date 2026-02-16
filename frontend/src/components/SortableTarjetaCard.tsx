@@ -27,15 +27,15 @@ function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onM
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
-    cursor: 'grab',
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} {...attributes}>
       <TarjetaCard tarjeta={tarjeta} columnas={columnas}
         onEdit={onEdit} onDelete={onDelete} onMove={onMove} compact={compact}
         selectable={selectable} selected={selected} onSelect={onSelect}
-        onBlock={onBlock} onUnblock={onUnblock} />
+        onBlock={onBlock} onUnblock={onUnblock}
+        dragHandleProps={listeners} isDragging={isDragging} />
     </div>
   );
 }
