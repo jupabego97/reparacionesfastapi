@@ -105,6 +105,16 @@ def _media_rows_for_card(db: Session, tarjeta_id: int) -> list[RepairCardMedia]:
     ).order_by(RepairCardMedia.position.asc(), RepairCardMedia.id.asc()).all()
 
 
+def _resolve_media_url(raw_url: str | None, storage_key: str | None) -> str | None:
+    if not raw_url and not storage_key:
+        return None
+    settings = get_settings()
+    public_base = (settings.s3_public_base_url or "").rstrip("/")
+    if public_base and storage_key:
+        return f"{public_base}/{storage_key}"
+    return raw_url
+
+
 def _media_cover_map(db: Session, card_ids: list[int]) -> tuple[dict[int, str | None], dict[int, int]]:
     if not card_ids:
         return {}, {}
@@ -122,7 +132,7 @@ def _media_cover_map(db: Session, card_ids: list[int]) -> tuple[dict[int, str | 
     for row in rows:
         count_map[row.tarjeta_id] = count_map.get(row.tarjeta_id, 0) + 1
         if row.tarjeta_id not in cover_map:
-            cover_map[row.tarjeta_id] = row.thumb_url or row.url
+            cover_map[row.tarjeta_id] = _resolve_media_url(row.thumb_url or row.url, row.storage_key)
     return cover_map, count_map
 
 
@@ -139,13 +149,16 @@ def _enrich_tarjeta(t: RepairCard, db: Session, include_image: bool = True) -> d
     d["comments_count"] = db.query(Comment).filter(Comment.tarjeta_id == t.id).count()
     media_rows = _media_rows_for_card(db, t.id)
     d["media_count"] = len(media_rows)
-    d["cover_thumb_url"] = (media_rows[0].thumb_url or media_rows[0].url) if media_rows else (t.image_url if include_image else None)
+    d["cover_thumb_url"] = (
+        _resolve_media_url(media_rows[0].thumb_url or media_rows[0].url, media_rows[0].storage_key)
+        if media_rows else (t.image_url if include_image else None)
+    )
     d["has_media"] = len(media_rows) > 0
     d["media_preview"] = [
         {
             "id": m.id,
-            "url": m.url,
-            "thumb_url": m.thumb_url or m.url,
+            "url": _resolve_media_url(m.url, m.storage_key),
+            "thumb_url": _resolve_media_url(m.thumb_url or m.url, m.storage_key),
             "position": m.position,
             "is_cover": m.is_cover,
         }
@@ -514,7 +527,13 @@ def get_tarjeta_by_id(id: int, db: Session = Depends(get_db)):
         # Expand media preview for detail view (up to 6 instead of board's 3)
         media_rows = _media_rows_for_card(db, t.id)
         result["media_preview"] = [
-            {"id": m.id, "url": m.url, "thumb_url": m.thumb_url or m.url, "position": m.position, "is_cover": m.is_cover}
+            {
+                "id": m.id,
+                "url": _resolve_media_url(m.url, m.storage_key),
+                "thumb_url": _resolve_media_url(m.thumb_url or m.url, m.storage_key),
+                "position": m.position,
+                "is_cover": m.is_cover,
+            }
             for m in media_rows[:6]
         ]
         return result
@@ -980,7 +999,13 @@ def get_tarjeta_media(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
     media = _media_rows_for_card(db, id)
     if media:
-        return [m.to_dict() for m in media]
+        out: list[dict] = []
+        for m in media:
+            d = m.to_dict()
+            d["url"] = _resolve_media_url(m.url, m.storage_key)
+            d["thumb_url"] = _resolve_media_url(m.thumb_url or m.url, m.storage_key)
+            out.append(d)
+        return out
     if t.image_url and t.image_url.startswith("data:image/"):
         try:
             settings = get_settings()

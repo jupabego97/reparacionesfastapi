@@ -1,8 +1,4 @@
-"""Servicio de almacenamiento de imágenes (S3/R2 o local base64).
-
-Mejora #22: Migra imágenes de base64 en BD a almacenamiento S3.
-Si S3 no está configurado, mantiene compatibilidad con base64.
-"""
+"""Servicio de almacenamiento de imagenes (S3/R2 o local base64)."""
 import base64
 import uuid
 from datetime import UTC, datetime
@@ -17,10 +13,12 @@ class StorageService:
         settings = get_settings()
         self.use_s3 = bool(settings.use_s3_storage and settings.s3_bucket)
         self._client = None
+        self._public_base_url = (settings.s3_public_base_url or "").rstrip("/")
 
         if self.use_s3:
             try:
                 import boto3
+
                 kwargs = {
                     "aws_access_key_id": settings.s3_access_key,
                     "aws_secret_access_key": settings.s3_secret_key,
@@ -35,13 +33,19 @@ class StorageService:
                 logger.warning(f"S3 no disponible, usando base64: {e}")
                 self.use_s3 = False
 
+    def build_public_url(self, key: str) -> str:
+        settings = get_settings()
+        if self._public_base_url:
+            return f"{self._public_base_url}/{key}"
+        if settings.s3_endpoint_url:
+            return f"{settings.s3_endpoint_url}/{self._bucket}/{key}"
+        return f"https://{self._bucket}.s3.{settings.s3_region}.amazonaws.com/{key}"
+
     def upload_image(self, image_data: str) -> str:
-        """Sube imagen base64 → devuelve URL pública o la misma base64 si no hay S3."""
         if not self.use_s3 or not self._client:
-            return image_data  # Mantiene base64 como fallback
+            return image_data
 
         try:
-            # Decodificar base64
             if image_data.startswith("data:image"):
                 header, encoded = image_data.split(",", 1)
                 content_type = header.split(":")[1].split(";")[0]
@@ -52,34 +56,16 @@ class StorageService:
                 ext = "jpeg"
 
             raw = base64.b64decode(encoded)
-            filename = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
-
-            self._client.put_object(
-                Bucket=self._bucket,
-                Key=filename,
-                Body=raw,
-                ContentType=content_type,
-            )
-
-            # Construir URL pública
-            settings = get_settings()
-            if settings.s3_endpoint_url:
-                url = f"{settings.s3_endpoint_url}/{self._bucket}/{filename}"
-            else:
-                url = f"https://{self._bucket}.s3.{settings.s3_region}.amazonaws.com/{filename}"
-
-            logger.info(f"Imagen subida a S3: {filename}")
+            key = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
+            self._client.put_object(Bucket=self._bucket, Key=key, Body=raw, ContentType=content_type)
+            url = self.build_public_url(key)
+            logger.info(f"Imagen subida a S3: {key}")
             return url
-
         except Exception as e:
             logger.error(f"Error subiendo a S3, usando base64: {e}")
             return image_data
 
     def upload_image_required(self, image_data: str) -> dict:
-        """Sube imagen y exige storage remoto disponible.
-
-        Retorna: {"url": str, "storage_key": str | None}
-        """
         if not self.use_s3 or not self._client:
             raise RuntimeError("Storage remoto no disponible para media_v2")
         try:
@@ -95,13 +81,7 @@ class StorageService:
             raw = base64.b64decode(encoded)
             key = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
             self._client.put_object(Bucket=self._bucket, Key=key, Body=raw, ContentType=content_type)
-
-            settings = get_settings()
-            if settings.s3_endpoint_url:
-                url = f"{settings.s3_endpoint_url}/{self._bucket}/{key}"
-            else:
-                url = f"https://{self._bucket}.s3.{settings.s3_region}.amazonaws.com/{key}"
-            return {"url": url, "storage_key": key}
+            return {"url": self.build_public_url(key), "storage_key": key}
         except Exception as e:
             logger.error(f"Error subiendo imagen requerida: {e}")
             raise RuntimeError("No se pudo subir imagen a storage remoto") from e
@@ -112,22 +92,15 @@ class StorageService:
         try:
             key = f"repairs/{datetime.now(UTC).strftime('%Y/%m')}/{uuid.uuid4().hex}.{ext}"
             self._client.put_object(Bucket=self._bucket, Key=key, Body=content, ContentType=mime_type)
-            settings = get_settings()
-            if settings.s3_endpoint_url:
-                url = f"{settings.s3_endpoint_url}/{self._bucket}/{key}"
-            else:
-                url = f"https://{self._bucket}.s3.{settings.s3_region}.amazonaws.com/{key}"
-            return {"url": url, "storage_key": key}
+            return {"url": self.build_public_url(key), "storage_key": key}
         except Exception as e:
             logger.error(f"Error subiendo bytes requeridos: {e}")
             raise RuntimeError("No se pudo subir archivo a storage remoto") from e
 
     def delete_image(self, url: str) -> bool:
-        """Elimina una imagen de S3 por su URL."""
         if not self.use_s3 or not self._client or not url.startswith("http"):
             return False
         try:
-            # Extraer key de la URL
             parts = url.split(f"{self._bucket}/", 1)
             if len(parts) > 1:
                 key = parts[1].split("?")[0]

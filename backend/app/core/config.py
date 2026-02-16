@@ -38,6 +38,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("S3_ENDPOINT_URL", "R2_ENDPOINT_URL"),
     )  # Para Cloudflare R2 u otros S3-compatible
+    s3_public_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("S3_PUBLIC_BASE_URL", "R2_PUBLIC_BASE_URL"),
+    )  # URL publica de entrega (ej: https://pub-xxxx.r2.dev)
     use_s3_storage: bool = Field(default=False, validation_alias=AliasChoices("USE_S3_STORAGE", "R2_ENABLED"))
     media_v2_read_write: bool = True
 
