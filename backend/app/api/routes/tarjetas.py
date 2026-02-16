@@ -161,6 +161,21 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
 
     card_ids = [t.id for t in items]
     cover_map, media_count_map = _media_cover_map(db, card_ids)
+    legacy_http_cover_map: dict[int, str] = {}
+    missing_cover_ids = [cid for cid in card_ids if cid not in cover_map]
+    if missing_cover_ids:
+        # Fallback only for legacy remote URLs. Do not load base64 payloads.
+        legacy_rows = db.query(RepairCard.id, RepairCard.image_url).filter(
+            RepairCard.id.in_(missing_cover_ids),
+            RepairCard.image_url.isnot(None),
+            or_(
+                RepairCard.image_url.like("http://%"),
+                RepairCard.image_url.like("https://%"),
+            ),
+        ).all()
+        for rid, image_url in legacy_rows:
+            if image_url:
+                legacy_http_cover_map[rid] = image_url
 
     # Bulk tags
     tag_links = db.execute(
@@ -204,7 +219,7 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
         d["subtasks_total"] = subtask_total.get(t.id, 0)
         d["subtasks_done"] = subtask_done.get(t.id, 0)
         d["comments_count"] = comment_counts.get(t.id, 0)
-        d["cover_thumb_url"] = cover_map.get(t.id) or (t.image_url if include_image else None)
+        d["cover_thumb_url"] = cover_map.get(t.id) or legacy_http_cover_map.get(t.id) or (t.image_url if include_image else None)
         d["media_count"] = media_count_map.get(t.id, 0)
         d["dias_en_columna"] = _calcular_dias_en_columna(t)
         result.append(d)
