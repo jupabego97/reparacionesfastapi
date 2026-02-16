@@ -262,7 +262,7 @@ export default function KanbanBoard({
   // Memoized selected set for O(1) lookup instead of Array.includes per card
   const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
-  const renderCard = useCallback((t: TarjetaBoardItem, col: KanbanColumn) => (
+  const renderCard = useCallback((t: TarjetaBoardItem, _col: KanbanColumn) => (
     <SortableTarjetaCard
       key={t.id}
       tarjeta={t}
@@ -270,7 +270,7 @@ export default function KanbanBoard({
       onEdit={onEdit}
       onDelete={handleDelete}
       onMove={handleMoveViaDrop}
-      compact={compactView || col.is_done_column}
+      compact={compactView}
       selectable={selectable}
       selected={selectedSet.has(t.id)}
       onSelect={onSelect}
@@ -313,7 +313,7 @@ export default function KanbanBoard({
                   onEdit={onEdit}
                   onDelete={(id: number) => deleteMutation.mutate(id)}
                   onMove={handleMoveViaDrop}
-                  compact={compactView || col.is_done_column}
+                  compact={compactView}
                   selectable={selectable}
                   selectedIds={selectedIds}
                   onSelect={onSelect}
