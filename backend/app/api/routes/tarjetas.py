@@ -3,6 +3,7 @@
 Mejoras integradas: prioridad, posición, asignación, notificaciones,
 costos, búsqueda server-side, S3 storage, soft delete, SQLite compat.
 """
+import base64
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -261,6 +262,24 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
             "imagen_url": cover_thumb,
         })
     return compact
+
+
+def _decode_legacy_data_image(image_url: str) -> tuple[str, bytes]:
+    if not image_url.startswith("data:image/"):
+        raise ValueError("Formato legacy invalido")
+    header, encoded = image_url.split(",", 1)
+    mime = header.split(";", 1)[0].split(":", 1)[1].lower()
+    if mime not in ALLOWED_MEDIA_MIME:
+        raise ValueError(f"MIME no soportado: {mime}")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except Exception:
+        raw = base64.b64decode(encoded)
+    if not raw:
+        raise ValueError("Imagen vacia")
+    if len(raw) > MAX_MEDIA_SIZE_BYTES:
+        raise ValueError(f"Archivo excede {MAX_MEDIA_SIZE_BYTES // (1024 * 1024)}MB")
+    return mime, raw
 
 
 # ──────────────────────────────────────────────────────────────
@@ -920,6 +939,105 @@ def get_tarjeta_media(id: int, db: Session = Depends(get_db)):
             "deleted_at": None,
         }]
     return []
+
+
+@router.post("/media/migrate-legacy")
+def migrate_legacy_media_to_r2(
+    limit: int = Query(100, ge=1, le=1000),
+    dry_run: bool = Query(False),
+    only_card_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+):
+    settings = get_settings()
+    if not settings.use_s3_storage:
+        raise HTTPException(status_code=400, detail="Storage remoto deshabilitado")
+    storage = get_storage_service()
+    if not storage.use_s3:
+        raise HTTPException(status_code=503, detail="Storage remoto no disponible")
+
+    q = db.query(RepairCard).filter(
+        RepairCard.deleted_at.is_(None),
+        RepairCard.image_url.isnot(None),
+        RepairCard.image_url.like("data:image/%"),
+    )
+    if only_card_id is not None:
+        q = q.filter(RepairCard.id == only_card_id)
+    cards = q.order_by(RepairCard.id.asc()).limit(limit).all()
+
+    migrated = 0
+    skipped_has_media = 0
+    failed = 0
+    details: list[dict] = []
+
+    for t in cards:
+        has_media = db.query(RepairCardMedia.id).filter(
+            RepairCardMedia.tarjeta_id == t.id,
+            RepairCardMedia.deleted_at.is_(None),
+        ).first()
+        if has_media:
+            skipped_has_media += 1
+            details.append({"tarjeta_id": t.id, "status": "skipped_has_media"})
+            continue
+
+        try:
+            mime, raw = _decode_legacy_data_image(t.image_url or "")
+            if dry_run:
+                details.append(
+                    {
+                        "tarjeta_id": t.id,
+                        "status": "dry_run_ok",
+                        "mime_type": mime,
+                        "size_bytes": len(raw),
+                    }
+                )
+                continue
+
+            started = time.perf_counter()
+            upload = storage.upload_bytes_required(raw, mime, ALLOWED_MEDIA_MIME[mime])
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+
+            item = RepairCardMedia(
+                tarjeta_id=t.id,
+                storage_key=upload.get("storage_key"),
+                url=upload["url"],
+                thumb_url=upload["url"],
+                position=0,
+                is_cover=True,
+                mime_type=mime,
+                size_bytes=len(raw),
+            )
+            db.add(item)
+            t.image_url = upload["url"]
+            db.commit()
+            migrated += 1
+            details.append(
+                {
+                    "tarjeta_id": t.id,
+                    "status": "migrated",
+                    "storage_key": upload.get("storage_key"),
+                    "url": upload["url"],
+                    "latency_ms": elapsed_ms,
+                }
+            )
+        except Exception as err:
+            db.rollback()
+            failed += 1
+            details.append({"tarjeta_id": t.id, "status": "failed", "error": str(err)})
+
+    if migrated > 0:
+        invalidate_stats()
+
+    return {
+        "ok": failed == 0,
+        "requested_by": admin.username,
+        "dry_run": dry_run,
+        "processed": len(cards),
+        "migrated": migrated,
+        "skipped_has_media": skipped_has_media,
+        "failed": failed,
+        "details": details,
+    }
 
 
 @router.post("/{id}/media", status_code=201)
