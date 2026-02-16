@@ -799,7 +799,7 @@ async def batch_update_positions(
         raise HTTPException(status_code=500, detail={
             "code": "batch_positions_error",
             "message": f"Error al actualizar posiciones: {type(exc).__name__}: {exc}",
-        })
+        }) from exc
 
 
 @router.post("/batch")
