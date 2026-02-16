@@ -212,6 +212,21 @@ export interface TarjetaMediaItem {
   deleted_at: string | null;
 }
 
+export type MediaUploadItemStatus = 'queued' | 'uploading' | 'done' | 'failed';
+
+export interface PendingMediaUpload {
+  tempId: string;
+  cardId: number;
+  fileMeta: {
+    name: string;
+    type: string;
+    lastModified: number;
+  };
+  dataUrlRef: string;
+  attempts: number;
+  nextRetryAt: number;
+}
+
 export interface ApiErrorShape {
   code: string;
   message: string;

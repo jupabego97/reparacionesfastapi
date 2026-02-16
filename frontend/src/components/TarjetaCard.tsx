@@ -33,7 +33,7 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
-function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock }: Props) {
+function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect }: Props) {
   const t = tarjeta;
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
@@ -44,6 +44,11 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
     : null;
   const isBlocked = !!t.bloqueada;
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
+
+  // Column arrow navigation
+  const colIndex = columnas.findIndex(c => c.key === t.columna);
+  const prevCol = colIndex > 0 ? columnas[colIndex - 1] : null;
+  const nextCol = colIndex < columnas.length - 1 ? columnas[colIndex + 1] : null;
 
   if (compact) {
     const compactThumb = t.cover_thumb_url || t.imagen_url || '';
@@ -56,12 +61,8 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         onKeyDown={e => { if (e.key === 'Enter') onEdit(t); }}
       >
         <div className="tarjeta-compact-row">
-          {compactThumb ? (
+          {compactThumb && (
             <img src={compactThumb} alt="Equipo" className="tarjeta-compact-thumb" loading="lazy" />
-          ) : (
-            <span className="tarjeta-compact-thumb placeholder" aria-hidden="true">
-              <i className="fas fa-image"></i>
-            </span>
           )}
           <span className="priority-dot" style={{ background: prio.color }}></span>
           <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
@@ -154,12 +155,8 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         </div>
       )}
 
-      {(t.cover_thumb_url || t.imagen_url) ? (
+      {(t.cover_thumb_url || t.imagen_url) && (
         <img src={t.cover_thumb_url || t.imagen_url || ''} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
-      ) : (
-        <div className="tarjeta-thumbnail tarjeta-thumbnail-placeholder" onClick={() => onEdit(t)}>
-          <i className="fas fa-image"></i>
-        </div>
       )}
 
       <div className="tarjeta-footer">
@@ -179,30 +176,25 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         </div>
         <div className="tarjeta-footer-right">
           {whatsUrl && (
-            <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-action" title="Escribir por WhatsApp" onClick={e => e.stopPropagation()}>
-              <i className="fab fa-whatsapp"></i> WA
+            <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-action btn-wa-big" title="Escribir por WhatsApp" onClick={e => e.stopPropagation()}>
+              <i className="fab fa-whatsapp"></i> WhatsApp
             </a>
           )}
           <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar" aria-label="Editar tarjeta">
             <i className="fas fa-pen"></i>
           </button>
-          {isBlocked ? (
-            <button className="btn-action btn-unblock" onClick={e => { e.stopPropagation(); onUnblock?.(t.id); }} title="Desbloquear" aria-label="Desbloquear tarjeta">
-              <i className="fas fa-lock-open"></i>
-            </button>
-          ) : (
-            <button className="btn-action btn-block" onClick={e => {
-              e.stopPropagation();
-              onBlock?.(t.id, 'Bloqueo manual');
-            }} title="Bloquear" aria-label="Bloquear tarjeta">
-              <i className="fas fa-lock"></i>
+          {prevCol && (
+            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
+              title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}>
+              <i className="fas fa-chevron-left"></i>
             </button>
           )}
-          <select className="move-select" value={t.columna}
-            onChange={e => { e.stopPropagation(); onMove(t.id, e.target.value); }}
-            onClick={e => e.stopPropagation()}>
-            {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
-          </select>
+          {nextCol && (
+            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
+              title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}>
+              <i className="fas fa-chevron-right"></i>
+            </button>
+          )}
         </div>
       </div>
     </div>

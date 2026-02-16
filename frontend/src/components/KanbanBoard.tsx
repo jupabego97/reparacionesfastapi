@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -122,6 +122,8 @@ export default function KanbanBoard({
 }: Props) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
+  const [visibleColIndex, setVisibleColIndex] = useState(0);
+  const boardRef = useRef<HTMLDivElement | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
@@ -262,6 +264,27 @@ export default function KanbanBoard({
   // Memoized selected set for O(1) lookup instead of Array.includes per card
   const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
+  // IntersectionObserver for mobile column dots
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const cols = board.querySelectorAll<HTMLElement>('.kanban-column');
+    if (!cols.length) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const idx = Array.from(cols).indexOf(entry.target as HTMLElement);
+            if (idx >= 0) setVisibleColIndex(idx);
+          }
+        }
+      },
+      { root: board, threshold: 0.6 }
+    );
+    cols.forEach(col => observer.observe(col));
+    return () => observer.disconnect();
+  }, [columnas]);
+
   const renderCard = useCallback((t: TarjetaBoardItem, _col: KanbanColumn) => (
     <SortableTarjetaCard
       key={t.id}
@@ -282,7 +305,7 @@ export default function KanbanBoard({
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter}
       onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
-      <div className="kanban-board">
+      <div className="kanban-board" ref={boardRef}>
         {columnas.map(col => {
           const cards = tarjetasPorColumna[col.key] || [];
           const wipExceeded = col.wip_limit != null && cards.length > col.wip_limit;
@@ -365,6 +388,14 @@ export default function KanbanBoard({
           </div>
         )}
       </DragOverlay>
+
+      <div className="kanban-column-dots">
+        {columnas.map((col, i) => (
+          <span key={col.key} className={`kanban-column-dot ${i === visibleColIndex ? 'active' : ''}`}
+            style={i === visibleColIndex ? { background: col.color } : undefined}
+            title={col.title} />
+        ))}
+      </div>
     </DndContext>
   );
 }

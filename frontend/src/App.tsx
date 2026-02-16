@@ -476,17 +476,6 @@ export default function App() {
             <i className="fas fa-plus"></i> <span className="btn-text">Nueva</span>
           </button>
 
-          <select className="header-select" value={groupBy} onChange={e => setGroupBy(e.target.value)} title="Agrupar por" aria-label="Agrupar tarjetas">
-            <option value="none">Sin agrupar</option>
-            <option value="priority">Por prioridad</option>
-            <option value="assignee">Por tecnico</option>
-          </select>
-
-          <button className={`header-btn ${compactView ? 'active' : ''}`} onClick={() => setCompactView(!compactView)}
-            title="Vista compacta" aria-label="Alternar vista compacta">
-            <i className={compactView ? 'fas fa-th-list' : 'fas fa-th-large'}></i>
-          </button>
-
           <NotificationCenter />
 
           <button className="header-btn" onClick={toggleTheme} title="Cambiar tema" aria-label="Cambiar tema">
@@ -562,6 +551,15 @@ export default function App() {
           <button className="toolbar-btn" disabled={!activeSavedViewId} onClick={removeSavedView} aria-label="Eliminar vista guardada">
             <i className="fas fa-trash"></i> Eliminar vista
           </button>
+          <select className="header-select" value={groupBy} onChange={e => setGroupBy(e.target.value)} title="Agrupar por" aria-label="Agrupar tarjetas">
+            <option value="none">Sin agrupar</option>
+            <option value="priority">Por prioridad</option>
+            <option value="assignee">Por tecnico</option>
+          </select>
+          <button className={`toolbar-btn ${compactView ? 'active' : ''}`} onClick={() => setCompactView(!compactView)}
+            title="Vista compacta" aria-label="Alternar vista compacta">
+            <i className={compactView ? 'fas fa-th-list' : 'fas fa-th-large'}></i> <span className="btn-text">Compacta</span>
+          </button>
         </div>
         <div className="toolbar-right">
           <button className={`toolbar-btn ${selectMode ? 'active' : ''}`}
@@ -574,6 +572,7 @@ export default function App() {
       <BusquedaFiltros filtros={filtros} onChange={setFiltros} totalResults={tarjetas.length} users={users} tags={allTags}
         columnas={columnas.map(c => ({ key: c.key, title: c.title }))} />
 
+      <div className="view-container" key={viewMode}>
       {viewMode === 'kanban' ? (
         <>
           {loadingCards ? (
@@ -609,6 +608,7 @@ export default function App() {
       ) : (
         <CalendarView tarjetas={tarjetas} onSelect={t => setEditCardId(t.id)} />
       )}
+      </div>
 
       {selectMode && selectedIds.length > 0 && (
         <BulkActionsBar
@@ -644,7 +644,9 @@ export default function App() {
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
       </Suspense>
 
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      <div aria-live="polite" aria-atomic="true">
+        {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      </div>
     </div>
   );
 }

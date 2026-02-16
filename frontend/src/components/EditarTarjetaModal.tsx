@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem } from '../api/client';
@@ -9,7 +9,7 @@ interface Props {
   onClose: () => void;
 }
 
-type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'costs' | 'photos';
+type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'photos';
 type HistorialEntry = {
   id: number;
   old_status: string | null;
@@ -29,6 +29,23 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   const [tab, setTab] = useState<TabKey>('info');
   const [showDelete, setShowDelete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Basic focus trap
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || !modalRef.current) return;
+    const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }, []);
 
   const { data: tarjeta, isLoading: loadingTarjeta } = useQuery<TarjetaDetail>({
     queryKey: ['tarjeta-detail', tarjetaId],
@@ -189,8 +206,8 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
 
   return (
     <>
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-pro modal-lg" onClick={e => e.stopPropagation()}>
+      <div className="modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
+        <div className="modal-pro modal-lg" ref={modalRef} onClick={e => e.stopPropagation()}>
           <div className="modal-pro-header">
             <h3><i className="fas fa-pen-fancy"></i> Editar Reparacion #{tarjetaId}</h3>
             <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
@@ -202,15 +219,14 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
             <>
               <div className="modal-tabs">
                 {[
-                  { key: 'info', icon: 'fas fa-info-circle', label: 'Informacion' },
-                  { key: 'subtasks', icon: 'fas fa-tasks', label: `Tareas (${subtasks.length})` },
-                  { key: 'comments', icon: 'fas fa-comments', label: `Comentarios (${comments.length})` },
-                  { key: 'history', icon: 'fas fa-history', label: 'Historial' },
-                  { key: 'costs', icon: 'fas fa-dollar-sign', label: 'Costos' },
-                  { key: 'photos', icon: 'fas fa-images', label: `Fotos (${media.length})` },
+                  { key: 'info', icon: 'fas fa-info-circle', label: 'Info', tooltip: 'Informacion y costos' },
+                  { key: 'subtasks', icon: 'fas fa-tasks', label: `Tareas (${subtasks.length})`, tooltip: 'Subtareas' },
+                  { key: 'comments', icon: 'fas fa-comments', label: `Comentarios (${comments.length})`, tooltip: 'Comentarios' },
+                  { key: 'history', icon: 'fas fa-history', label: 'Historial', tooltip: 'Historial' },
+                  { key: 'photos', icon: 'fas fa-images', label: `Fotos (${media.length})`, tooltip: 'Fotos' },
                 ].map(t => (
                   <button key={t.key} className={`modal-tab ${tab === t.key ? 'active' : ''}`}
-                    onClick={() => setTab(t.key as TabKey)}>
+                    onClick={() => setTab(t.key as TabKey)} data-tooltip={t.tooltip}>
                     <i className={t.icon}></i> <span>{t.label}</span>
                   </button>
                 ))}
@@ -280,6 +296,56 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Costs (consolidated from Costs tab) */}
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label><i className="fas fa-calculator"></i> Costo estimado ($)</label>
+                        <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value })} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label><i className="fas fa-receipt"></i> Costo final ($)</label>
+                        <input type="number" value={form.costo_final} onChange={e => setForm({ ...form, costo_final: e.target.value })} placeholder="0" />
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label><i className="fas fa-sticky-note"></i> Notas de costo</label>
+                      <textarea rows={2} value={form.notas_costo} onChange={e => setForm({ ...form, notas_costo: e.target.value })} placeholder="Detalles del presupuesto..." />
+                    </div>
+                    {tarjeta.costo_estimado != null && tarjeta.costo_final != null && (
+                      <div className="cost-summary">
+                        <div className="cost-diff">
+                          <span>Diferencia:</span>
+                          <strong style={{ color: tarjeta.costo_final <= tarjeta.costo_estimado ? '#22c55e' : '#ef4444' }}>
+                            ${(tarjeta.costo_final - tarjeta.costo_estimado).toLocaleString()}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Block/Unblock */}
+                    <div className="form-group">
+                      <label><i className="fas fa-lock"></i> Bloqueo</label>
+                      {tarjeta.bloqueada ? (
+                        <button type="button" className="btn-save" style={{ background: '#22c55e' }}
+                          onClick={async () => {
+                            await api.unblockTarjeta(tarjetaId);
+                            qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
+                            qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+                          }}>
+                          <i className="fas fa-lock-open"></i> Desbloquear tarjeta
+                        </button>
+                      ) : (
+                        <button type="button" className="btn-save" style={{ background: '#ef4444' }}
+                          onClick={async () => {
+                            await api.blockTarjeta(tarjetaId, 'Bloqueo manual');
+                            qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
+                            qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+                          }}>
+                          <i className="fas fa-lock"></i> Bloquear tarjeta
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -358,35 +424,6 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                       ))}
                       {historial.length === 0 && <p className="empty-msg">Sin cambios de estado registrados</p>}
                     </div>
-                  </div>
-                )}
-
-                {tab === 'costs' && (
-                  <div className="costs-tab">
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label><i className="fas fa-calculator"></i> Costo estimado ($)</label>
-                        <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value })} placeholder="0" />
-                      </div>
-                      <div className="form-group">
-                        <label><i className="fas fa-receipt"></i> Costo final ($)</label>
-                        <input type="number" value={form.costo_final} onChange={e => setForm({ ...form, costo_final: e.target.value })} placeholder="0" />
-                      </div>
-                    </div>
-                    <div className="form-group">
-                      <label><i className="fas fa-sticky-note"></i> Notas de costo</label>
-                      <textarea rows={3} value={form.notas_costo} onChange={e => setForm({ ...form, notas_costo: e.target.value })} placeholder="Detalles del presupuesto..." />
-                    </div>
-                    {tarjeta.costo_estimado != null && tarjeta.costo_final != null && (
-                      <div className="cost-summary">
-                        <div className="cost-diff">
-                          <span>Diferencia:</span>
-                          <strong style={{ color: tarjeta.costo_final <= tarjeta.costo_estimado ? '#22c55e' : '#ef4444' }}>
-                            ${(tarjeta.costo_final - tarjeta.costo_estimado).toLocaleString()}
-                          </strong>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 
