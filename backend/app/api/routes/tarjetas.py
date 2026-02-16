@@ -753,39 +753,53 @@ async def batch_update_positions(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Batch-load all cards in one query instead of O(N) queries
-    item_ids = [item.id for item in data.items]
-    cards_by_id = {
-        t.id: t
-        for t in db.query(RepairCard).filter(RepairCard.id.in_(item_ids)).all()
-    }
+    import logging
+    logger = logging.getLogger(__name__)
 
-    changed: list[dict] = []
-    for item in data.items:
-        t = cards_by_id.get(item.id)
-        if t:
-            old_status = t.status
-            t.position = item.posicion
-            if t.status != item.columna:
-                _check_wip_limit(db, item.columna, exclude_card_id=item.id)
-
-                db.add(StatusHistory(
-                    tarjeta_id=t.id, old_status=old_status, new_status=item.columna,
-                    changed_at=datetime.now(UTC),
-                    changed_by=user.id,
-                    changed_by_name=user.full_name,
-                ))
-                t.status = item.columna
-                _apply_status_transition(t, item.columna)
-            changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
-
-    db.commit()
-    invalidate_stats()
     try:
-        await sio.emit("tarjetas_reordenadas", {"event_version": 1, "data": {"items": changed}})
-    except Exception:
-        pass
-    return {"ok": True}
+        # Batch-load all cards in one query instead of O(N) queries
+        item_ids = [item.id for item in data.items]
+        cards_by_id = {
+            t.id: t
+            for t in db.query(RepairCard).filter(RepairCard.id.in_(item_ids)).all()
+        }
+
+        changed: list[dict] = []
+        for item in data.items:
+            t = cards_by_id.get(item.id)
+            if t:
+                old_status = t.status
+                t.position = item.posicion
+                if t.status != item.columna:
+                    _check_wip_limit(db, item.columna, exclude_card_id=item.id)
+
+                    db.add(StatusHistory(
+                        tarjeta_id=t.id, old_status=old_status, new_status=item.columna,
+                        changed_at=datetime.now(UTC),
+                        changed_by=user.id,
+                        changed_by_name=user.full_name,
+                    ))
+                    t.status = item.columna
+                    _apply_status_transition(t, item.columna)
+                changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
+
+        db.commit()
+        invalidate_stats()
+        try:
+            await sio.emit("tarjetas_reordenadas", {"event_version": 1, "data": {"items": changed}})
+        except Exception:
+            pass
+        return {"ok": True}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("batch_update_positions failed: %s", exc)
+        raise HTTPException(status_code=500, detail={
+            "code": "batch_positions_error",
+            "message": f"Error al actualizar posiciones: {type(exc).__name__}: {exc}",
+        })
 
 
 @router.post("/batch")
