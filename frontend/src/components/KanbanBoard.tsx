@@ -21,7 +21,7 @@ interface Props {
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
   onMoveSuccess?: () => void;
-  onMoveError?: () => void;
+  onMoveError?: (err?: unknown) => void;
 }
 
 const PRIORITY_LABELS: Record<string, string> = { alta: 'Alta', media: 'Media', baja: 'Baja' };
@@ -176,7 +176,8 @@ export default function KanbanBoard({
       }
       return { snapshot };
     },
-    onError: (_err, _items, context) => {
+    onError: (err, _items, context) => {
+      console.error('[KanbanBoard] batchMutation error:', err);
       // Rollback to snapshot
       const snapshot = context?.snapshot as [unknown, unknown][] | undefined;
       if (snapshot) {
@@ -184,7 +185,7 @@ export default function KanbanBoard({
           queryClient.setQueryData(key as Parameters<typeof queryClient.setQueryData>[0], data);
         }
       }
-      onMoveError?.();
+      onMoveError?.(err);
     },
     onSuccess: () => {
       onMoveSuccess?.();

@@ -603,7 +603,10 @@ export default function App() {
               onEdit={t => setEditCardId(t.id)} groupBy={groupBy} compactView={compactView}
               selectable={selectMode} selectedIds={selectedIds} onSelect={toggleSelect}
               onBlock={handleBlock} onUnblock={handleUnblock}
-              onMoveError={() => setToast({ msg: 'Error al mover tarjeta', type: 'error' })}
+              onMoveError={(err) => {
+                const msg = err instanceof Error ? err.message : (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message) : 'Error desconocido';
+                setToast({ msg: `Error al mover: ${msg}`, type: 'error' });
+              }}
               onMoveSuccess={() => {}} />
           )}
         </>
