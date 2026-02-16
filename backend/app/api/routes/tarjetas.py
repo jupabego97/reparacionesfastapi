@@ -282,6 +282,61 @@ def _decode_legacy_data_image(image_url: str) -> tuple[str, bytes]:
     return mime, raw
 
 
+def _migrate_legacy_image_for_card(
+    db: Session,
+    card: RepairCard,
+    storage,
+) -> RepairCardMedia | None:
+    if not card.image_url or not card.image_url.startswith("data:image/"):
+        return None
+    existing = db.query(RepairCardMedia).filter(
+        RepairCardMedia.tarjeta_id == card.id,
+        RepairCardMedia.deleted_at.is_(None),
+    ).first()
+    if existing:
+        return None
+    mime, raw = _decode_legacy_data_image(card.image_url)
+    upload = storage.upload_bytes_required(raw, mime, ALLOWED_MEDIA_MIME[mime])
+    item = RepairCardMedia(
+        tarjeta_id=card.id,
+        storage_key=upload.get("storage_key"),
+        url=upload["url"],
+        thumb_url=upload["url"],
+        position=0,
+        is_cover=True,
+        mime_type=mime,
+        size_bytes=len(raw),
+    )
+    db.add(item)
+    card.image_url = upload["url"]
+    db.flush()
+    return item
+
+
+def _auto_migrate_legacy_for_cards(db: Session, cards: list[RepairCard], max_cards: int = 25) -> int:
+    settings = get_settings()
+    if not settings.use_s3_storage:
+        return 0
+    storage = get_storage_service()
+    if not storage.use_s3:
+        return 0
+
+    migrated = 0
+    for card in cards:
+        if migrated >= max_cards:
+            break
+        try:
+            item = _migrate_legacy_image_for_card(db, card, storage)
+            if item is not None:
+                db.commit()
+                migrated += 1
+        except Exception:
+            db.rollback()
+    if migrated > 0:
+        invalidate_stats()
+    return migrated
+
+
 # ──────────────────────────────────────────────────────────────
 # CRUD Endpoints
 # ──────────────────────────────────────────────────────────────
@@ -374,6 +429,7 @@ def get_tarjetas(
             page_items = fast_q.limit(per_page + 1).all()
             has_next = len(page_items) > per_page
             items = page_items[:per_page]
+            _auto_migrate_legacy_for_cards(db, items, max_cards=20)
             next_cursor = str(items[-1].id) if has_next and items else None
             total = q.order_by(None).count() if include_totals else None
             pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
@@ -397,6 +453,7 @@ def get_tarjetas(
         page_items = q.offset((page - 1) * per_page).limit(per_page + 1).all()
         has_next = len(page_items) > per_page
         items = page_items[:per_page]
+        _auto_migrate_legacy_for_cards(db, items, max_cards=20)
         total = q.order_by(None).count() if include_totals else None
         pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
         data = {
@@ -924,6 +981,19 @@ def get_tarjeta_media(id: int, db: Session = Depends(get_db)):
     media = _media_rows_for_card(db, id)
     if media:
         return [m.to_dict() for m in media]
+    if t.image_url and t.image_url.startswith("data:image/"):
+        try:
+            settings = get_settings()
+            if settings.use_s3_storage:
+                storage = get_storage_service()
+                if storage.use_s3:
+                    item = _migrate_legacy_image_for_card(db, t, storage)
+                    if item is not None:
+                        db.commit()
+                        invalidate_stats()
+                        return [item.to_dict()]
+        except Exception:
+            db.rollback()
     if t.image_url:
         return [{
             "id": 0,
@@ -981,8 +1051,8 @@ def migrate_legacy_media_to_r2(
             continue
 
         try:
-            mime, raw = _decode_legacy_data_image(t.image_url or "")
             if dry_run:
+                mime, raw = _decode_legacy_data_image(t.image_url or "")
                 details.append(
                     {
                         "tarjeta_id": t.id,
@@ -994,29 +1064,20 @@ def migrate_legacy_media_to_r2(
                 continue
 
             started = time.perf_counter()
-            upload = storage.upload_bytes_required(raw, mime, ALLOWED_MEDIA_MIME[mime])
+            item = _migrate_legacy_image_for_card(db, t, storage)
+            if item is None:
+                skipped_has_media += 1
+                details.append({"tarjeta_id": t.id, "status": "skipped"})
+                continue
             elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-
-            item = RepairCardMedia(
-                tarjeta_id=t.id,
-                storage_key=upload.get("storage_key"),
-                url=upload["url"],
-                thumb_url=upload["url"],
-                position=0,
-                is_cover=True,
-                mime_type=mime,
-                size_bytes=len(raw),
-            )
-            db.add(item)
-            t.image_url = upload["url"]
             db.commit()
             migrated += 1
             details.append(
                 {
                     "tarjeta_id": t.id,
                     "status": "migrated",
-                    "storage_key": upload.get("storage_key"),
-                    "url": upload["url"],
+                    "storage_key": item.storage_key,
+                    "url": item.url,
                     "latency_ms": elapsed_ms,
                 }
             )
