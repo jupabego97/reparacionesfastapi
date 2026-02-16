@@ -46,6 +46,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
 
   if (compact) {
+    const compactThumb = t.cover_thumb_url || t.imagen_url || '';
     return (
       <div
         className={`tarjeta-card compact ${overdue ? 'overdue' : ''} ${isBlocked ? 'blocked' : ''}`}
@@ -55,6 +56,13 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         onKeyDown={e => { if (e.key === 'Enter') onEdit(t); }}
       >
         <div className="tarjeta-compact-row">
+          {compactThumb ? (
+            <img src={compactThumb} alt="Equipo" className="tarjeta-compact-thumb" loading="lazy" />
+          ) : (
+            <span className="tarjeta-compact-thumb placeholder" aria-hidden="true">
+              <i className="fas fa-image"></i>
+            </span>
+          )}
           <span className="priority-dot" style={{ background: prio.color }}></span>
           <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
           {t.asignado_nombre && <span className="assigned-badge" title={t.asignado_nombre}>{t.asignado_nombre[0]}</span>}

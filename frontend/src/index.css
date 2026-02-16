@@ -991,6 +991,23 @@ body {
   gap: 0.4rem;
 }
 
+.tarjeta-compact-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+.tarjeta-compact-thumb.placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: var(--input-bg);
+}
+
 .priority-dot {
   width: 8px;
   height: 8px;
