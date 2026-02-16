@@ -145,32 +145,43 @@ export default function KanbanBoard({
   const batchMutation = useMutation({
     mutationFn: (items: { id: number; columna: string; posicion: number }[]) => api.batchUpdatePositions(items),
     onMutate: async (items) => {
-      await queryClient.cancelQueries({ queryKey: ['tarjetas-board'] });
-      const snapshot = queryClient.getQueriesData({ queryKey: ['tarjetas-board'] });
-      // Optimistic update: apply position/column changes immediately
-      queryClient.setQueriesData<unknown>({ queryKey: ['tarjetas-board'] }, (old: unknown) => {
-        if (!old || typeof old !== 'object') return old;
-        const data = old as { pages: { tarjetas: TarjetaBoardItem[] }[] };
-        if (!data.pages) return old;
+      // Save snapshot for rollback, then apply optimistic update
+      let snapshot: [unknown, unknown][] = [];
+      try {
+        snapshot = queryClient.getQueriesData({ queryKey: ['tarjetas-board'] }) as [unknown, unknown][];
+        await queryClient.cancelQueries({ queryKey: ['tarjetas-board'] });
         const byId = new Map(items.map(i => [i.id, i]));
-        return {
-          ...data,
-          pages: data.pages.map((page: { tarjetas: TarjetaBoardItem[] }) => ({
-            ...page,
-            tarjetas: page.tarjetas.map((t: TarjetaBoardItem) => {
-              const upd = byId.get(t.id);
-              return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
-            }),
-          })),
-        };
-      });
+        for (const [key] of snapshot) {
+          queryClient.setQueryData(key as Parameters<typeof queryClient.setQueryData>[0], (old: unknown) => {
+            if (!old || typeof old !== 'object') return old;
+            const data = old as { pages?: { tarjetas?: TarjetaBoardItem[] }[]; pageParams?: unknown[] };
+            if (!Array.isArray(data.pages)) return old;
+            return {
+              ...data,
+              pages: data.pages.map(page => {
+                if (!Array.isArray(page.tarjetas)) return page;
+                return {
+                  ...page,
+                  tarjetas: page.tarjetas.map((t: TarjetaBoardItem) => {
+                    const upd = byId.get(t.id);
+                    return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
+                  }),
+                };
+              }),
+            };
+          });
+        }
+      } catch (e) {
+        console.warn('[KanbanBoard] optimistic update skipped:', e);
+      }
       return { snapshot };
     },
     onError: (_err, _items, context) => {
       // Rollback to snapshot
-      if (context?.snapshot) {
-        for (const [key, data] of context.snapshot) {
-          queryClient.setQueryData(key, data);
+      const snapshot = context?.snapshot as [unknown, unknown][] | undefined;
+      if (snapshot) {
+        for (const [key, data] of snapshot) {
+          queryClient.setQueryData(key as Parameters<typeof queryClient.setQueryData>[0], data);
         }
       }
       onMoveError?.();
