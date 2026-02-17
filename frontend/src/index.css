@@ -2317,7 +2317,7 @@ body {
     touch-action: manipulation;
     overscroll-behavior-x: contain;
     scroll-padding-inline: 0.5rem;
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));
   }
 
   .kanban-board::after {
@@ -2467,15 +2467,74 @@ body {
     padding: 0;
   }
 
+  .modal-pro-header {
+    padding: 0.5rem 0.75rem;
+    min-height: 44px;
+  }
+
+  .modal-pro-header h3 {
+    font-size: 0.85rem;
+  }
+
+  .modal-pro-header h3 i {
+    display: none;
+  }
+
   .modal-pro-body {
-    padding: 1rem;
+    padding: 0.75rem;
     min-height: 0;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+
+  .modal-pro-body .edit-form {
+    gap: 0.5rem;
+  }
+
+  .modal-pro-body .edit-form .form-group {
+    gap: 0.15rem;
+  }
+
+  .modal-pro-body .edit-form .form-group label {
+    font-size: 0.72rem;
+  }
+
+  .modal-pro-body .form-advanced-accordion {
+    margin-top: 0.5rem;
+  }
+
+  .edit-form .preview-image img {
+    max-height: 100px;
+  }
+
+  .modal-pro-body .login-error {
+    margin: 0 0 0.5rem 0;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
   }
 
   .modal-pro-footer {
-    padding: 0.75rem 1rem;
+    padding: 0.75rem;
     padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .modal-pro-footer .btn-save {
+    width: 100%;
+    min-height: 52px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    border-radius: var(--radius-sm);
+    justify-content: center;
+    order: -1;
+  }
+
+  .modal-pro-footer .btn-cancel {
+    width: 100%;
+    min-height: 44px;
+    font-size: 0.85rem;
+    justify-content: center;
   }
 
   /* Modal tabs: scroll with snap, better touch targets */
@@ -2673,41 +2732,43 @@ body {
   /* Mobile FAB: muy grande y prominente, safe-area */
   .mobile-fab-new {
     position: fixed;
-    left: 12px;
-    right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     z-index: 1400;
-    height: 96px;
-    min-height: 96px;
-    padding: 0 2.5rem;
+    height: 110px;
+    min-height: 110px;
+    padding: 0 2rem;
     border: none;
-    border-radius: 16px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+    border-radius: 22px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
     color: #fff;
-    box-shadow: 0 12px 40px rgba(34, 211, 238, 0.5);
+    box-shadow: 0 14px 44px rgba(34, 211, 238, 0.5), 0 0 0 4px rgba(34, 211, 238, 0.12);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.75rem;
-    font-size: 1.5rem;
-    font-weight: 700;
+    gap: 1rem;
+    font-size: 1.75rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
     cursor: pointer;
     transition: transform 0.18s ease, box-shadow 0.18s ease;
-    animation: fabPulse 2s ease-in-out infinite;
+    animation: fabPulse 2.5s ease-in-out infinite;
   }
 
   .mobile-fab-new i {
-    font-size: 2rem;
+    font-size: 2.5rem;
   }
 
   .mobile-fab-new:active {
-    transform: translateY(1px) scale(0.96);
+    transform: translateY(2px) scale(0.97);
     animation: none;
+    box-shadow: 0 6px 20px rgba(34, 211, 238, 0.3);
   }
 
   @keyframes fabPulse {
-    0%, 100% { box-shadow: 0 12px 40px rgba(34, 211, 238, 0.5); }
-    50% { box-shadow: 0 14px 48px rgba(34, 211, 238, 0.65); }
+    0%, 100% { box-shadow: 0 14px 44px rgba(34, 211, 238, 0.5), 0 0 0 4px rgba(34, 211, 238, 0.12); }
+    50% { box-shadow: 0 18px 56px rgba(34, 211, 238, 0.65), 0 0 0 8px rgba(34, 211, 238, 0.08); }
   }
 
   /* Photo grid: 2 columns */
@@ -2738,6 +2799,30 @@ body {
   }
 
   /* Mantener column para que formulario y camara se adapten correctamente */
+
+  .modal-pro-header {
+    padding: 0.3rem 0.75rem;
+    min-height: 36px;
+  }
+
+  .modal-pro-header h3 {
+    font-size: 0.8rem;
+  }
+
+  .modal-pro-body {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .modal-pro-footer {
+    padding: 0.5rem 0.75rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    flex-direction: row;
+  }
+
+  .modal-pro-footer .btn-save {
+    min-height: 40px;
+    font-size: 0.9rem;
+  }
 }
 
 /* --- Small phones (≤380px) --- */
@@ -2760,6 +2845,17 @@ body {
 
   .app-title {
     font-size: 1rem;
+  }
+
+  .mobile-fab-new {
+    height: 96px;
+    min-height: 96px;
+    font-size: 1.5rem;
+    border-radius: 18px;
+  }
+
+  .mobile-fab-new i {
+    font-size: 2.2rem;
   }
 }
 

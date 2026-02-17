@@ -646,9 +646,9 @@ export default function App() {
 
       {showActivity && <ActivityFeed onClose={() => setShowActivity(false)} />}
 
-      <button className="mobile-fab-new" onClick={() => setShowNew(true)} title="Nueva reparacion">
+      <button className="mobile-fab-new" onClick={() => setShowNew(true)} title="Nueva reparacion" aria-label="Crear nueva reparacion">
         <i className="fas fa-plus"></i>
-        <span>Nueva</span>
+        <span>Nueva Reparación</span>
       </button>
 
       <Suspense fallback={null}>

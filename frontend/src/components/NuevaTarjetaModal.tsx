@@ -177,6 +177,11 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     }
     if (!form.fecha_limite) errs.fecha = 'La fecha límite es requerida';
     setValidationErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      setTimeout(() => {
+        document.querySelector('.field-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
     return Object.keys(errs).length === 0;
   };
 
@@ -311,7 +316,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
                 </div>
                 <div className="form-group">
                   <label><i className="fas fa-exclamation-circle"></i> Problema</label>
-                  <textarea rows={3} value={form.problema} onChange={e => setForm({ ...form, problema: e.target.value })} placeholder="Describe el problema del equipo..." />
+                  <textarea rows={isMobile ? 2 : 3} value={form.problema} onChange={e => setForm({ ...form, problema: e.target.value })} placeholder="Describe el problema del equipo..." />
                 </div>
                 <div className="form-row">
                   <div className="form-group">
