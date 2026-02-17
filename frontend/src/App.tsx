@@ -116,9 +116,22 @@ async function fetchBoardCards(params: {
   });
 }
 
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
+}
+
 export default function App() {
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
+  const [mobileHome, setMobileHome] = useState(true);
   const reorderBufferRef = useRef<ReorderItem[]>([]);
   const reorderTimerRef = useRef<number | null>(null);
 
@@ -460,6 +473,47 @@ export default function App() {
 
   if (!isAuthenticated) {
     return <LoginScreen />;
+  }
+
+  if (isMobile && mobileHome) {
+    return (
+      <div className="app" data-theme={theme}>
+        <div className="mobile-home-screen">
+          <div className="mobile-home-logo">
+            <i className="fas fa-microchip"></i>
+            <h1>Nanotronics</h1>
+          </div>
+          <div className="mobile-home-actions">
+            <button className="mobile-home-btn mobile-home-btn-primary"
+              onClick={() => { setMobileHome(false); setShowNew(true); }}>
+              <i className="fas fa-plus-circle"></i>
+              <span>Crear Reparación</span>
+            </button>
+            <button className="mobile-home-btn mobile-home-btn-secondary"
+              onClick={() => setMobileHome(false)}>
+              <i className="fas fa-columns"></i>
+              <span>Ver Tablero</span>
+            </button>
+          </div>
+          <ConexionBadge status={connStatus} />
+        </div>
+
+        <Suspense fallback={null}>
+          {showNew && (
+            <NuevaTarjetaModal
+              onClose={() => setShowNew(false)}
+              onSuccess={() => {
+                setToast({ msg: 'Tarjeta creada correctamente', type: 'success' });
+                qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+              }}
+            />
+          )}
+        </Suspense>
+        <div aria-live="polite" aria-atomic="true">
+          {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+        </div>
+      </div>
+    );
   }
 
   return (

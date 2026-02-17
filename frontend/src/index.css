@@ -2485,6 +2485,8 @@ body {
     min-height: 0;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
+    display: flex;
+    flex-direction: column;
   }
 
   .modal-pro-body .edit-form {
@@ -2774,6 +2776,68 @@ body {
   /* Photo grid: 2 columns */
   .photo-grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+
+  /* Preview step: constrain image so buttons are always visible */
+  .capture-preview-step {
+    flex: 1;
+    min-height: 0;
+    justify-content: center;
+  }
+
+  .capture-preview-image {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .capture-preview-image img {
+    max-height: calc(100dvh - 220px);
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .capture-preview-actions {
+    flex-shrink: 0;
+    padding: 0.75rem 0;
+    gap: 0.75rem;
+  }
+
+  .capture-preview-actions .btn-cancel,
+  .capture-preview-actions .btn-save {
+    flex: 1;
+    min-height: 52px;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  /* Mobile card arrows: dedicated row with column names */
+  .tarjeta-mobile-arrows {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem 0;
+    border-top: 1px solid var(--border);
+    margin-top: 0.25rem;
+  }
+
+  .tarjeta-mobile-arrows .btn-col-arrow {
+    flex: 1;
+    min-height: 38px;
+    font-size: 0.72rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Hide the regular footer arrows on mobile since we have the dedicated row */
+  .tarjeta-footer-right .btn-col-arrow {
+    display: none;
   }
 
   /* Skeleton: responsive */
@@ -3495,6 +3559,88 @@ body {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
+}
+
+/* ==================== Mobile Home Screen ==================== */
+.mobile-home-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 2rem 1.5rem;
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
+  gap: 3rem;
+  background: var(--bg-primary);
+}
+
+.mobile-home-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-primary);
+}
+
+.mobile-home-logo i {
+  font-size: 3.5rem;
+  color: var(--accent);
+}
+
+.mobile-home-logo h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.mobile-home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+.mobile-home-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  width: 100%;
+  min-height: 80px;
+  padding: 1.25rem 2rem;
+  border: none;
+  border-radius: 18px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mobile-home-btn:active {
+  transform: scale(0.97);
+}
+
+.mobile-home-btn i {
+  font-size: 1.8rem;
+}
+
+.mobile-home-btn-primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  color: #fff;
+  box-shadow: 0 10px 36px rgba(34, 211, 238, 0.4);
+}
+
+.mobile-home-btn-secondary {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 2px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ==================== Mobile Card Arrows ==================== */
+.tarjeta-mobile-arrows {
+  display: none;
 }
 
 .mobile-fab-new {
