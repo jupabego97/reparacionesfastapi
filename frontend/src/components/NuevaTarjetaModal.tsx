@@ -33,8 +33,8 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [cameraActive, setCameraActive] = useState(false);
   const isMobile = useIsMobile();
+  const [cameraActive, setCameraActive] = useState(() => window.innerWidth <= 768);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'partial_failed' | 'done'>('idle');
@@ -72,11 +72,22 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     };
   }, []);
 
+  // En móvil: ir directo a la cámara al abrir, sin menú de opciones
+  useEffect(() => {
+    if (isMobile && step === 'capture') {
+      setCameraActive(true);
+      startCamera();
+    }
+  }, [isMobile, step]);
+
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       if (videoRef.current) { videoRef.current.srcObject = stream; setCameraActive(true); }
-    } catch { setError('No se pudo acceder a la cámara'); }
+    } catch {
+      setError('No se pudo acceder a la cámara');
+      setCameraActive(false); // Mostrar opciones subir/sin imagen si falla
+    }
   };
 
   const capturePhoto = () => {
@@ -103,6 +114,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
 
   const retakePhoto = () => {
     setCapturedPreview(null);
+    setCameraActive(true);
     setStep('capture');
     startCamera();
   };
@@ -222,7 +234,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
               {cameraActive ? (
                 <div className={`camera-container ${isMobile ? 'camera-fullscreen-inner' : ''}`}>
                   {isMobile && (
-                    <button type="button" className="camera-back-btn" onClick={() => { (videoRef.current?.srcObject as MediaStream)?.getTracks().forEach(t => t.stop()); setCameraActive(false); }} aria-label="Cerrar cámara">
+                    <button type="button" className="camera-back-btn" onClick={() => { (videoRef.current?.srcObject as MediaStream)?.getTracks().forEach(t => t.stop()); onClose(); }} aria-label="Cerrar cámara">
                       <i className="fas fa-times"></i>
                     </button>
                   )}
