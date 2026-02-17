@@ -260,8 +260,8 @@ function jsonHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json', ...authHeaders() };
 }
 
-export async function parseApiError(res: Response): Promise<ApiError> {
-  const raw = await res.text();
+export async function parseApiError(res: Response, rawText?: string): Promise<ApiError> {
+  const raw = rawText ?? await res.text();
   try {
     const data = JSON.parse(raw) as Partial<ApiErrorShape>;
     return new ApiError(
@@ -587,12 +587,24 @@ export const api = {
   },
 
   // --- Multimedia ---
-  async procesarImagen(imageData: string): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean }> {
+  async procesarImagen(imageData: string): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean; _partial?: boolean }> {
     const res = await fetch(`${API_BASE}/api/procesar-imagen`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ image: imageData }),
     });
-    await ensureOk(res);
-    return res.json();
+    const raw = await res.text();
+    let data: { nombre?: string; telefono?: string; tiene_cargador?: boolean };
+    try {
+      data = raw ? (JSON.parse(raw) as { nombre?: string; telefono?: string; tiene_cargador?: boolean }) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      if (data && typeof data.nombre === 'string') {
+        return { nombre: data.nombre, telefono: data.telefono ?? '', tiene_cargador: !!data.tiene_cargador, _partial: true };
+      }
+      throw await parseApiError(res, raw);
+    }
+    return { nombre: data.nombre ?? 'Cliente', telefono: data.telefono ?? '', tiene_cargador: !!data.tiene_cargador };
   },
   async transcribirAudio(formData: FormData): Promise<{ transcripcion: string }> {
     const res = await fetch(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });

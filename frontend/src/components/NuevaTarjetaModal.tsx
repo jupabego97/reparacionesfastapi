@@ -26,7 +26,7 @@ function useIsMobile(): boolean {
 }
 
 export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
-  const [step, setStep] = useState<'capture' | 'preview' | 'form'>('capture');
+  const [step, setStep] = useState<'capture' | 'preview' | 'processing' | 'form'>('capture');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [flash, setFlash] = useState(false);
@@ -130,6 +130,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
   const processImage = async (imageData: string) => {
     setLoading(true);
     setError('');
+    setStep('processing');
     try {
       const result = await api.procesarImagen(imageData);
       setForm(prev => ({
@@ -139,13 +140,15 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
         tiene_cargador: result.tiene_cargador ? 'si' : 'no',
         imagen_url: imageData,
       }));
-      setCapturedPreview(null);
-      setStep('form');
+      if (result._partial) {
+        setError('IA no disponible. Completa los datos manualmente.');
+      }
     } catch {
       setForm(prev => ({ ...prev, imagen_url: imageData }));
-      setCapturedPreview(null);
-      setStep('form');
+      setError('No se pudo analizar la imagen. Completa los datos manualmente.');
     }
+    setCapturedPreview(null);
+    setStep('form');
     setLoading(false);
     if (videoRef.current?.srcObject) {
       (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
@@ -249,6 +252,14 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
                 </div>
               )}
               {loading && <div className="ai-loading"><i className="fas fa-brain fa-pulse"></i> Procesando con IA...</div>}
+            </div>
+          )}
+
+          {step === 'processing' && (
+            <div className="ai-processing-screen">
+              <i className="fas fa-brain fa-pulse"></i>
+              <p>Analizando imagen con IA...</p>
+              <div className="ai-processing-bar" />
             </div>
           )}
 
