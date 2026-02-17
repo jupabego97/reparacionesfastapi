@@ -1,5 +1,16 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { DndContext, pointerWithin, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay, useDroppable } from '@dnd-kit/core';
+
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 768);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
+}
 import type { DragEndEvent, DragStartEvent, DragOverEvent, CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -58,6 +69,7 @@ function VirtualizedColumnList({
   onSelect,
   onBlock,
   onUnblock,
+  disableDrag,
 }: {
   cards: TarjetaBoardItem[];
   columnas: KanbanColumn[];
@@ -71,6 +83,7 @@ function VirtualizedColumnList({
   onSelect?: (id: number) => void;
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
+  disableDrag?: boolean;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
@@ -117,6 +130,7 @@ function VirtualizedColumnList({
                       onSelect={onSelect}
                       onBlock={onBlock}
                       onUnblock={onUnblock}
+                      disableDrag={disableDrag}
                     />
                   </div>
                 );
@@ -148,6 +162,7 @@ export default function KanbanBoard({
   const [visibleColIndex, setVisibleColIndex] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } }),
@@ -347,6 +362,17 @@ export default function KanbanBoard({
   // Memoized selected set for O(1) lookup instead of Array.includes per card
   const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
+  const scrollToColumn = useCallback((index: number) => {
+    const board = boardRef.current;
+    if (!board) return;
+    const cols = board.querySelectorAll<HTMLElement>('.kanban-column');
+    const col = cols[index];
+    if (col) {
+      col.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      setVisibleColIndex(index);
+    }
+  }, []);
+
   // IntersectionObserver for mobile column dots
   useEffect(() => {
     const board = boardRef.current;
@@ -382,12 +408,31 @@ export default function KanbanBoard({
       onSelect={onSelect}
       onBlock={onBlock}
       onUnblock={onUnblock}
+      disableDrag={isMobile}
     />
-  ), [columnas, onEdit, handleDelete, handleMoveViaDrop, compactView, selectable, selectedSet, onSelect, onBlock, onUnblock]);
+  ), [columnas, onEdit, handleDelete, handleMoveViaDrop, compactView, selectable, selectedSet, onSelect, onBlock, onUnblock, isMobile]);
 
   return (
     <DndContext sensors={sensors} collisionDetection={kanbanCollision}
       onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+      {isMobile && (
+        <div className="kanban-column-tabs" role="tablist" aria-label="Columnas del tablero">
+          {columnas.map((col, i) => (
+            <button
+              key={col.key}
+              type="button"
+              role="tab"
+              aria-selected={i === visibleColIndex}
+              aria-label={`Ir a ${col.title}`}
+              className={`kanban-column-tab ${i === visibleColIndex ? 'active' : ''}`}
+              style={i === visibleColIndex ? { borderColor: col.color, color: col.color } : undefined}
+              onClick={() => scrollToColumn(i)}
+            >
+              {col.title}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="kanban-board" ref={boardRef}>
         {columnas.map(col => {
           const cards = tarjetasPorColumna[col.key] || [];
@@ -425,6 +470,7 @@ export default function KanbanBoard({
                   onSelect={onSelect}
                   onBlock={onBlock}
                   onUnblock={onUnblock}
+                  disableDrag={isMobile}
                 />
               ) : (
                 <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy}>
@@ -474,9 +520,15 @@ export default function KanbanBoard({
 
       <div className="kanban-column-dots">
         {columnas.map((col, i) => (
-          <span key={col.key} className={`kanban-column-dot ${i === visibleColIndex ? 'active' : ''}`}
+          <button
+            key={col.key}
+            type="button"
+            className={`kanban-column-dot ${i === visibleColIndex ? 'active' : ''}`}
             style={i === visibleColIndex ? { background: col.color } : undefined}
-            title={col.title} />
+            title={col.title}
+            aria-label={`Ir a columna ${col.title}`}
+            onClick={() => scrollToColumn(i)}
+          />
         ))}
       </div>
     </DndContext>

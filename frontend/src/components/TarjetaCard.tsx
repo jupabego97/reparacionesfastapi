@@ -79,13 +79,15 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
             <div className="tarjeta-compact-arrows">
               {prevCol && (
                 <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
-                  title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}>
+                  title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}
+                  style={{ borderColor: prevCol.color, color: prevCol.color }}>
                   <i className="fas fa-chevron-left"></i>
                 </button>
               )}
               {nextCol && (
                 <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
-                  title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}>
+                  title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}
+                  style={{ borderColor: nextCol.color, color: nextCol.color }}>
                   <i className="fas fa-chevron-right"></i>
                 </button>
               )}
@@ -211,13 +213,15 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           </button>
           {prevCol && (
             <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
-              title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}>
+              title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}
+              style={{ borderColor: prevCol.color, color: prevCol.color }}>
               <i className="fas fa-chevron-left"></i>
             </button>
           )}
           {nextCol && (
             <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
-              title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}>
+              title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}
+              style={{ borderColor: nextCol.color, color: nextCol.color }}>
               <i className="fas fa-chevron-right"></i>
             </button>
           )}

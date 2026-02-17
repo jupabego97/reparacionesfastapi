@@ -5,6 +5,7 @@ import type { Tag, UserInfo, TarjetaCreate } from '../api/client';
 
 interface Props {
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
 function defaultTomorrowDate(): string {
@@ -13,13 +14,27 @@ function defaultTomorrowDate(): string {
   return d.toISOString().split('T')[0];
 }
 
-export default function NuevaTarjetaModal({ onClose }: Props) {
-  const [step, setStep] = useState<'capture' | 'form'>('capture');
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
+}
+
+export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
+  const [step, setStep] = useState<'capture' | 'preview' | 'form'>('capture');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [flash, setFlash] = useState(false);
+  const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const isMobile = useIsMobile();
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'partial_failed' | 'done'>('idle');
@@ -38,6 +53,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
   });
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags });
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers });
@@ -71,7 +87,24 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
     c.height = v.videoHeight;
     c.getContext('2d')?.drawImage(v, 0, 0);
     const dataUrl = c.toDataURL('image/jpeg', 0.7);
-    processImage(dataUrl);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 200);
+    setCapturedPreview(dataUrl);
+    setStep('preview');
+    if (videoRef.current?.srcObject) {
+      (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      setCameraActive(false);
+    }
+  };
+
+  const confirmPhoto = () => {
+    if (capturedPreview) processImage(capturedPreview);
+  };
+
+  const retakePhoto = () => {
+    setCapturedPreview(null);
+    setStep('capture');
+    startCamera();
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,9 +139,11 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
         tiene_cargador: result.tiene_cargador ? 'si' : 'no',
         imagen_url: imageData,
       }));
+      setCapturedPreview(null);
       setStep('form');
     } catch {
       setForm(prev => ({ ...prev, imagen_url: imageData }));
+      setCapturedPreview(null);
       setStep('form');
     }
     setLoading(false);
@@ -156,6 +191,7 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
           setError('Tarjeta creada, pero algunas fotos no se pudieron subir');
         }
       }
+      onSuccess?.();
       onClose();
     } catch {
       setUploadState('idle');
@@ -174,30 +210,39 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
           {error && <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {error}</div>}
 
           {step === 'capture' && (
-            <div className="capture-step">
-              <p className="capture-instructions">
-                <i className="fas fa-magic"></i> Toma una foto del equipo y la IA extraerá los datos automáticamente
-              </p>
+            <div className={`capture-step ${isMobile && cameraActive ? 'camera-fullscreen' : ''}`}>
+              {!cameraActive && (
+                <p className="capture-instructions">
+                  <i className="fas fa-magic"></i> Toma una foto del equipo y la IA extraerá los datos automáticamente
+                </p>
+              )}
               {cameraActive ? (
-                <div className="camera-container">
-                  <video ref={videoRef} autoPlay playsInline className="camera-preview" />
+                <div className={`camera-container ${isMobile ? 'camera-fullscreen-inner' : ''}`}>
+                  {isMobile && (
+                    <button type="button" className="camera-back-btn" onClick={() => { (videoRef.current?.srcObject as MediaStream)?.getTracks().forEach(t => t.stop()); setCameraActive(false); }} aria-label="Cerrar cámara">
+                      <i className="fas fa-times"></i>
+                    </button>
+                  )}
+                  {flash && <div className="capture-flash" aria-hidden="true" />}
+                  <video ref={videoRef} autoPlay playsInline muted className="camera-preview" />
                   <canvas ref={canvasRef} style={{ display: 'none' }} />
-                  <button className="btn-capture" onClick={capturePhoto} disabled={loading}>
+                  <button className="btn-capture btn-capture-large" onClick={capturePhoto} disabled={loading}
+                    type="button" aria-label="Tomar foto">
                     {loading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-camera"></i>}
                   </button>
                 </div>
               ) : (
-                <div className="capture-options">
-                  <button className="capture-btn" onClick={startCamera}>
+                <div className="capture-options capture-options-horizontal">
+                  <button className="capture-btn capture-btn-large" onClick={startCamera} type="button">
                     <i className="fas fa-camera"></i>
                     <span>Usar cámara</span>
                   </button>
-                  <label className="capture-btn">
+                  <label className="capture-btn capture-btn-large">
                     <i className="fas fa-image"></i>
                     <span>Subir imagenes</span>
                     <input type="file" accept="image/*" multiple onChange={handleFileUpload} style={{ display: 'none' }} />
                   </label>
-                  <button className="capture-btn skip" onClick={() => setStep('form')}>
+                  <button className="capture-btn capture-btn-large skip" onClick={() => setStep('form')} type="button">
                     <i className="fas fa-keyboard"></i>
                     <span>Sin imagen</span>
                   </button>
@@ -207,84 +252,114 @@ export default function NuevaTarjetaModal({ onClose }: Props) {
             </div>
           )}
 
+          {step === 'preview' && capturedPreview && (
+            <div className="capture-preview-step">
+              <p className="capture-instructions">Revisa la foto</p>
+              <div className="capture-preview-image">
+                <img src={capturedPreview} alt="Vista previa" />
+              </div>
+              <div className="capture-preview-actions">
+                <button className="btn-cancel" onClick={retakePhoto} type="button">
+                  <i className="fas fa-redo"></i> Repetir
+                </button>
+                <button className="btn-save" onClick={confirmPhoto} disabled={loading} type="button">
+                  {loading ? <><i className="fas fa-spinner fa-spin"></i> Procesando...</> : <><i className="fas fa-check"></i> Aceptar</>}
+                </button>
+              </div>
+            </div>
+          )}
+
           {step === 'form' && (
             <div className="edit-form">
-              <div className="form-row">
-                <div className="form-group">
-                  <label><i className="fas fa-user"></i> Propietario *</label>
-                  <input value={form.nombre_propietario} onChange={e => setForm({ ...form, nombre_propietario: e.target.value })}
-                    className={validationErrors.nombre ? 'error' : ''} autoFocus />
-                  {validationErrors.nombre && <span className="field-error">{validationErrors.nombre}</span>}
-                </div>
-                <div className="form-group">
-                  <label><i className="fab fa-whatsapp"></i> WhatsApp</label>
-                  <input value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })}
-                    placeholder="+57 300 123 4567" className={validationErrors.whatsapp ? 'error' : ''} />
-                  {validationErrors.whatsapp && <span className="field-error">{validationErrors.whatsapp}</span>}
-                </div>
-              </div>
-              <div className="form-group">
-                <label><i className="fas fa-exclamation-circle"></i> Problema</label>
-                <textarea rows={3} value={form.problema} onChange={e => setForm({ ...form, problema: e.target.value })} placeholder="Describe el problema del equipo..." />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label><i className="fas fa-calendar"></i> Fecha límite *</label>
-                  <input type="date" value={form.fecha_limite} onChange={e => setForm({ ...form, fecha_limite: e.target.value })}
-                    className={validationErrors.fecha ? 'error' : ''} />
-                  {validationErrors.fecha && <span className="field-error">{validationErrors.fecha}</span>}
-                </div>
-                <div className="form-group">
-                  <label><i className="fas fa-plug"></i> Cargador</label>
-                  <select value={form.tiene_cargador} onChange={e => setForm({ ...form, tiene_cargador: e.target.value })}>
-                    <option value="si">Sí</option>
-                    <option value="no">No</option>
-                  </select>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label><i className="fas fa-flag"></i> Prioridad</label>
-                  <select value={form.prioridad} onChange={e => setForm({ ...form, prioridad: e.target.value })}>
-                    <option value="alta">🔴 Alta</option>
-                    <option value="media">🟡 Media</option>
-                    <option value="baja">🟢 Baja</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label><i className="fas fa-user-cog"></i> Asignar a</label>
-                  <select value={form.asignado_a} onChange={e => setForm({ ...form, asignado_a: e.target.value })}>
-                    <option value="">Sin asignar</option>
-                    {users.map((u: UserInfo) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="form-group">
-                <label><i className="fas fa-wrench"></i> Notas técnicas</label>
-                <textarea rows={2} value={form.notas_tecnicas} onChange={e => setForm({ ...form, notas_tecnicas: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label><i className="fas fa-dollar-sign"></i> Costo estimado</label>
-                <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value })} placeholder="0" />
-              </div>
-              {allTags.length > 0 && (
-                <div className="form-group">
-                  <label><i className="fas fa-tags"></i> Etiquetas</label>
-                  <div className="tags-select">
-                    {allTags.map((tag: Tag) => (
-                      <button key={tag.id} type="button"
-                        className={`tag-chip-btn ${selectedTags.includes(tag.id) ? 'selected' : ''}`}
-                        style={{
-                          borderColor: tag.color, color: selectedTags.includes(tag.id) ? '#fff' : tag.color,
-                          background: selectedTags.includes(tag.id) ? tag.color : 'transparent'
-                        }}
-                        onClick={() => setSelectedTags(p => p.includes(tag.id) ? p.filter(i => i !== tag.id) : [...p, tag.id])}>
-                        {tag.name}
-                      </button>
-                    ))}
+              <div className="form-essentials">
+                <div className="form-row">
+                  <div className="form-group">
+                    <label><i className="fas fa-user"></i> Propietario *</label>
+                    <input value={form.nombre_propietario} onChange={e => setForm({ ...form, nombre_propietario: e.target.value })}
+                      className={validationErrors.nombre ? 'error' : ''} autoFocus />
+                    {validationErrors.nombre && <span className="field-error">{validationErrors.nombre}</span>}
+                  </div>
+                  <div className="form-group">
+                    <label><i className="fab fa-whatsapp"></i> WhatsApp</label>
+                    <input value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })}
+                      placeholder="+57 300 123 4567" className={validationErrors.whatsapp ? 'error' : ''} />
+                    {validationErrors.whatsapp && <span className="field-error">{validationErrors.whatsapp}</span>}
                   </div>
                 </div>
-              )}
+                <div className="form-group">
+                  <label><i className="fas fa-exclamation-circle"></i> Problema</label>
+                  <textarea rows={3} value={form.problema} onChange={e => setForm({ ...form, problema: e.target.value })} placeholder="Describe el problema del equipo..." />
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label><i className="fas fa-calendar"></i> Fecha límite *</label>
+                    <input type="date" value={form.fecha_limite} onChange={e => setForm({ ...form, fecha_limite: e.target.value })}
+                      className={validationErrors.fecha ? 'error' : ''} />
+                    {validationErrors.fecha && <span className="field-error">{validationErrors.fecha}</span>}
+                  </div>
+                  <div className="form-group">
+                    <label><i className="fas fa-plug"></i> Cargador</label>
+                    <select value={form.tiene_cargador} onChange={e => setForm({ ...form, tiene_cargador: e.target.value })}>
+                      <option value="si">Sí</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-advanced-accordion">
+                <button type="button" className="form-advanced-toggle" onClick={() => setAdvancedOpen(!advancedOpen)}
+                  aria-expanded={advancedOpen}>
+                  <i className={`fas fa-chevron-${advancedOpen ? 'up' : 'down'}`}></i> Más opciones
+                </button>
+                {advancedOpen && (
+                  <div className="form-advanced-content">
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label><i className="fas fa-flag"></i> Prioridad</label>
+                        <select value={form.prioridad} onChange={e => setForm({ ...form, prioridad: e.target.value })}>
+                          <option value="alta">Alta</option>
+                          <option value="media">Media</option>
+                          <option value="baja">Baja</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label><i className="fas fa-user-cog"></i> Asignar a</label>
+                        <select value={form.asignado_a} onChange={e => setForm({ ...form, asignado_a: e.target.value })}>
+                          <option value="">Sin asignar</option>
+                          {users.map((u: UserInfo) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label><i className="fas fa-wrench"></i> Notas técnicas</label>
+                      <textarea rows={2} value={form.notas_tecnicas} onChange={e => setForm({ ...form, notas_tecnicas: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label><i className="fas fa-dollar-sign"></i> Costo estimado</label>
+                      <input type="number" value={form.costo_estimado} onChange={e => setForm({ ...form, costo_estimado: e.target.value })} placeholder="0" />
+                    </div>
+                    {allTags.length > 0 && (
+                      <div className="form-group">
+                        <label><i className="fas fa-tags"></i> Etiquetas</label>
+                        <div className="tags-select">
+                          {allTags.map((tag: Tag) => (
+                            <button key={tag.id} type="button"
+                              className={`tag-chip-btn ${selectedTags.includes(tag.id) ? 'selected' : ''}`}
+                              style={{
+                                borderColor: tag.color, color: selectedTags.includes(tag.id) ? '#fff' : tag.color,
+                                background: selectedTags.includes(tag.id) ? tag.color : 'transparent'
+                              }}
+                              onClick={() => setSelectedTags(p => p.includes(tag.id) ? p.filter(i => i !== tag.id) : [...p, tag.id])}>
+                              {tag.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
               {form.imagen_url && (
                 <div className="preview-image">
                   <img src={form.imagen_url} alt="Preview" />

@@ -8,6 +8,7 @@ Create Date: 2026-02-16
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import inspect
 import sqlalchemy as sa
 
 
@@ -18,20 +19,37 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    insp = inspect(conn)
+    cols = [c["name"] for c in insp.get_columns(table)]
+    return column in cols
+
+
 def upgrade() -> None:
-    op.add_column("status_history", sa.Column("changed_by", sa.Integer(), nullable=True))
-    op.add_column("status_history", sa.Column("changed_by_name", sa.Text(), nullable=True))
-    op.create_foreign_key(
-        "fk_status_history_changed_by_users",
-        "status_history",
-        "users",
-        ["changed_by"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    conn = op.get_bind()
+    if not _column_exists(conn, "status_history", "changed_by"):
+        op.add_column("status_history", sa.Column("changed_by", sa.Integer(), nullable=True))
+    if not _column_exists(conn, "status_history", "changed_by_name"):
+        op.add_column("status_history", sa.Column("changed_by_name", sa.Text(), nullable=True))
+    # SQLite no soporta ALTER ADD CONSTRAINT; PostgreSQL sí.
+    if conn.dialect.name != "sqlite":
+        insp = inspect(conn)
+        fks = insp.get_foreign_keys("status_history")
+        fk_exists = any(fk.get("name") == "fk_status_history_changed_by_users" for fk in fks)
+        if not fk_exists:
+            op.create_foreign_key(
+                "fk_status_history_changed_by_users",
+                "status_history",
+                "users",
+                ["changed_by"],
+                ["id"],
+                ondelete="SET NULL",
+            )
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_status_history_changed_by_users", "status_history", type_="foreignkey")
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite":
+        op.drop_constraint("fk_status_history_changed_by_users", "status_history", type_="foreignkey")
     op.drop_column("status_history", "changed_by_name")
     op.drop_column("status_history", "changed_by")

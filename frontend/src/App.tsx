@@ -531,11 +531,11 @@ export default function App() {
               <i className="fas fa-calendar-alt"></i> Calendario
             </button>
           </div>
-          <span className="shortcuts-hint" title="N = Nueva | E = Estadisticas | X = Exportar | / = Buscar | Esc = Cerrar">
+          <span className="shortcuts-hint toolbar-secondary" title="N = Nueva | E = Estadisticas | X = Exportar | / = Buscar | Esc = Cerrar">
             <i className="fas fa-keyboard"></i> Atajos
           </span>
           <select
-            className="header-select"
+            className="header-select toolbar-secondary"
             value={activeSavedViewId}
             onChange={e => applySavedView(e.target.value)}
             aria-label="Vistas guardadas"
@@ -545,13 +545,13 @@ export default function App() {
               <option key={v.id} value={v.id}>{v.name}</option>
             ))}
           </select>
-          <button className="toolbar-btn" onClick={saveCurrentView} aria-label="Guardar vista actual">
+          <button className="toolbar-btn toolbar-secondary" onClick={saveCurrentView} aria-label="Guardar vista actual">
             <i className="fas fa-save"></i> Guardar vista
           </button>
-          <button className="toolbar-btn" disabled={!activeSavedViewId} onClick={removeSavedView} aria-label="Eliminar vista guardada">
+          <button className="toolbar-btn toolbar-secondary" disabled={!activeSavedViewId} onClick={removeSavedView} aria-label="Eliminar vista guardada">
             <i className="fas fa-trash"></i> Eliminar vista
           </button>
-          <select className="header-select" value={groupBy} onChange={e => setGroupBy(e.target.value)} title="Agrupar por" aria-label="Agrupar tarjetas">
+          <select className="header-select toolbar-secondary" value={groupBy} onChange={e => setGroupBy(e.target.value)} title="Agrupar por" aria-label="Agrupar tarjetas">
             <option value="none">Sin agrupar</option>
             <option value="priority">Por prioridad</option>
             <option value="assignee">Por tecnico</option>
@@ -604,8 +604,13 @@ export default function App() {
               selectable={selectMode} selectedIds={selectedIds} onSelect={toggleSelect}
               onBlock={handleBlock} onUnblock={handleUnblock}
               onMoveError={(err) => {
-                const msg = err instanceof Error ? err.message : (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message) : 'Error desconocido';
-                setToast({ msg: `Error al mover: ${msg}`, type: 'error' });
+                let msg = err instanceof Error ? err.message : (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message) : 'Error desconocido';
+                if (/ProgrammingError|psycopg2|SQL|column|relation|undefined/i.test(msg)) {
+                  msg = 'No se pudo mover la tarjeta. Intenta de nuevo.';
+                } else {
+                  msg = `Error al mover: ${msg}`;
+                }
+                setToast({ msg, type: 'error' });
               }}
               onMoveSuccess={(cardId, oldCol, newCol) => {
                 const colTitle = columnas.find(c => c.key === newCol)?.title || newCol;
@@ -647,7 +652,15 @@ export default function App() {
       </button>
 
       <Suspense fallback={null}>
-        {showNew && <NuevaTarjetaModal onClose={() => setShowNew(false)} />}
+        {showNew && (
+          <NuevaTarjetaModal
+            onClose={() => setShowNew(false)}
+            onSuccess={() => {
+              setToast({ msg: 'Tarjeta creada correctamente', type: 'success' });
+              qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+            }}
+          />
+        )}
         {editCardId != null && <EditarTarjetaModal tarjetaId={editCardId} onClose={() => setEditCardId(null)} />}
         {showStats && <EstadisticasModal onClose={() => setShowStats(false)} />}
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
