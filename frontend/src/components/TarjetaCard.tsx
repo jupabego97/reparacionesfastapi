@@ -227,6 +227,25 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           )}
         </div>
       </div>
+
+      {(prevCol || nextCol) && (
+        <div className="tarjeta-mobile-arrows">
+          {prevCol ? (
+            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
+              title={`← ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}
+              style={{ borderColor: prevCol.color, color: prevCol.color }}>
+              <i className="fas fa-chevron-left"></i> {prevCol.title}
+            </button>
+          ) : <span />}
+          {nextCol ? (
+            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
+              title={`${nextCol.title} →`} aria-label={`Mover a ${nextCol.title}`}
+              style={{ borderColor: nextCol.color, color: nextCol.color }}>
+              {nextCol.title} <i className="fas fa-chevron-right"></i>
+            </button>
+          ) : <span />}
+        </div>
+      )}
     </div>
   );
 }
