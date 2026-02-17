@@ -607,7 +607,11 @@ export default function App() {
                 const msg = err instanceof Error ? err.message : (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message) : 'Error desconocido';
                 setToast({ msg: `Error al mover: ${msg}`, type: 'error' });
               }}
-              onMoveSuccess={() => {}} />
+              onMoveSuccess={(cardId, oldCol, newCol) => {
+                const colTitle = columnas.find(c => c.key === newCol)?.title || newCol;
+                setToast({ msg: `Tarjeta movida a ${colTitle}`, type: 'success' });
+                setUndoAction({ cardId, oldCol, msg: `Movida a ${colTitle}` });
+              }} />
           )}
         </>
       ) : (

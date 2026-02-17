@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
-import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
+import { DndContext, pointerWithin, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay, useDroppable } from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent, DragOverEvent, CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -20,8 +20,25 @@ interface Props {
   onSelect?: (id: number) => void;
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
-  onMoveSuccess?: () => void;
+  onMoveSuccess?: (cardId: number, oldCol: string, newCol: string) => void;
   onMoveError?: (err?: unknown) => void;
+}
+
+// Custom collision detection: prefer pointerWithin, fallback to closestCenter
+const kanbanCollision: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) return pointerCollisions;
+  return closestCenter(args);
+};
+
+// Droppable column wrapper — registers each column as a drop target
+function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div ref={setNodeRef} className={`kanban-column-body ${isOver ? 'droppable-over' : ''}`}>
+      {children}
+    </div>
+  );
 }
 
 const PRIORITY_LABELS: Record<string, string> = { alta: 'Alta', media: 'Media', baja: 'Baja' };
@@ -64,48 +81,50 @@ function VirtualizedColumnList({
   });
 
   return (
-    <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy} id={col.key}>
-      <div className="kanban-column-body" data-droppable={col.key} ref={parentRef}>
-        {cards.length === 0 && (
-          <div className="kanban-empty">
-            <i className="fas fa-inbox" style={{ color: col.color, opacity: 0.3 }}></i>
-            <span>Arrastra aqui</span>
-          </div>
-        )}
-        {cards.length > 0 && (
-          <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
-            {rowVirtualizer.getVirtualItems().map(virtualItem => {
-              const t = cards[virtualItem.index];
-              return (
-                <div
-                  key={t.id}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualItem.start}px)`,
-                  }}
-                >
-                  <SortableTarjetaCard
-                    tarjeta={t}
-                    columnas={columnas}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onMove={onMove}
-                    compact={compact}
-                    selectable={selectable}
-                    selected={selectedIds?.includes(t.id)}
-                    onSelect={onSelect}
-                    onBlock={onBlock}
-                    onUnblock={onUnblock}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+    <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy}>
+      <DroppableColumn id={col.key}>
+        <div ref={parentRef} style={{ flex: 1, overflowY: 'auto' }}>
+          {cards.length === 0 && (
+            <div className="kanban-empty">
+              <i className="fas fa-inbox" style={{ color: col.color, opacity: 0.3 }}></i>
+              <span>Arrastra aquí</span>
+            </div>
+          )}
+          {cards.length > 0 && (
+            <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+              {rowVirtualizer.getVirtualItems().map(virtualItem => {
+                const t = cards[virtualItem.index];
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    <SortableTarjetaCard
+                      tarjeta={t}
+                      columnas={columnas}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onMove={onMove}
+                      compact={compact}
+                      selectable={selectable}
+                      selected={selectedIds?.includes(t.id)}
+                      onSelect={onSelect}
+                      onBlock={onBlock}
+                      onUnblock={onUnblock}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </DroppableColumn>
     </SortableContext>
   );
 }
@@ -133,6 +152,8 @@ export default function KanbanBoard({
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } }),
   );
+
+  const lastMoveRef = useRef<{ cardId: number; oldCol: string; newCol: string } | null>(null);
 
   const tarjetaById = useMemo(() => {
     const map = new Map<number, TarjetaBoardItem>();
@@ -188,7 +209,11 @@ export default function KanbanBoard({
       onMoveError?.(err);
     },
     onSuccess: () => {
-      onMoveSuccess?.();
+      const move = lastMoveRef.current;
+      if (move) {
+        onMoveSuccess?.(move.cardId, move.oldCol, move.newCol);
+        lastMoveRef.current = null;
+      }
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tarjetas-board'] });
@@ -298,6 +323,7 @@ export default function KanbanBoard({
     const updates: { id: number; columna: string; posicion: number }[] = [];
     if (destCol !== draggedCard.columna) {
       sourceCards.forEach((t, i) => updates.push({ id: t.id, columna: draggedCard.columna, posicion: i }));
+      lastMoveRef.current = { cardId: draggedId, oldCol: draggedCard.columna, newCol: destCol };
     }
     destCards.forEach((t, i) => updates.push({ id: t.id, columna: destCol, posicion: i }));
 
@@ -307,6 +333,9 @@ export default function KanbanBoard({
   const handleMoveViaDrop = useCallback((id: number, newCol: string) => {
     const card = tarjetaById.get(id);
     if (!card) return;
+    if (card.columna !== newCol) {
+      lastMoveRef.current = { cardId: id, oldCol: card.columna, newCol };
+    }
     const destCards = [...(tarjetasPorColumna[newCol] || [])];
     const updates = [{ id, columna: newCol, posicion: destCards.length }];
     batchMutation.mutate(updates);
@@ -357,7 +386,7 @@ export default function KanbanBoard({
   ), [columnas, onEdit, handleDelete, handleMoveViaDrop, compactView, selectable, selectedSet, onSelect, onBlock, onUnblock]);
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter}
+    <DndContext sensors={sensors} collisionDetection={kanbanCollision}
       onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
       <div className="kanban-board" ref={boardRef}>
         {columnas.map(col => {
@@ -398,12 +427,12 @@ export default function KanbanBoard({
                   onUnblock={onUnblock}
                 />
               ) : (
-                <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy} id={col.key}>
-                  <div className="kanban-column-body" data-droppable={col.key}>
+                <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                  <DroppableColumn id={col.key}>
                     {cards.length === 0 && (
                       <div className="kanban-empty">
                         <i className="fas fa-inbox" style={{ color: col.color, opacity: 0.3 }}></i>
-                        <span>Arrastra aqui</span>
+                        <span>Arrastra aquí</span>
                       </div>
                     )}
                     {groupBy === 'priority' ? (
@@ -427,7 +456,7 @@ export default function KanbanBoard({
                     ) : (
                       cards.map(t => renderCard(t, col))
                     )}
-                  </div>
+                  </DroppableColumn>
                 </SortableContext>
               )}
             </div>

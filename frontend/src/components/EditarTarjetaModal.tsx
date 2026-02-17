@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem } from '../api/client';
+import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem, KanbanColumn } from '../api/client';
 import ConfirmModal from './ConfirmModal';
 
 interface Props {
@@ -60,6 +60,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
     tiene_cargador: 'si',
     notas_tecnicas: '',
     prioridad: 'media',
+    columna: '',
     asignado_a: '' as string | number,
     costo_estimado: '' as string | number,
     costo_final: '' as string | number,
@@ -80,6 +81,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
       tiene_cargador: tarjeta.tiene_cargador || 'si',
       notas_tecnicas: tarjeta.notas_tecnicas || '',
       prioridad: tarjeta.prioridad || 'media',
+      columna: tarjeta.columna || '',
       asignado_a: tarjeta.asignado_a ?? '',
       costo_estimado: tarjeta.costo_estimado ?? '',
       costo_final: tarjeta.costo_final ?? '',
@@ -91,6 +93,12 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   // Global data — uses staleTime so App-level cache is reused (no redundant fetches)
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers, staleTime: 5 * 60_000 });
+  const { data: columnas = [] } = useQuery<KanbanColumn[]>({ queryKey: ['columnas'], queryFn: api.getColumnas, staleTime: 5 * 60_000 });
+  const colTitleMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    columnas.forEach(c => { map[c.key] = c.title; });
+    return map;
+  }, [columnas]);
 
   // Card-specific data — only fetch when the relevant tab is active
   const { data: subtasks = [], refetch: refetchSubtasks } = useQuery({
@@ -114,6 +122,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
     mutationFn: (data: TarjetaUpdate) => api.updateTarjeta(tarjetaId, data),
     onSuccess: (updated) => {
       qc.setQueryData(['tarjeta-detail', tarjetaId], updated);
+      qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
       onClose();
     },
   });
@@ -173,6 +182,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
       tiene_cargador: form.tiene_cargador,
       notas_tecnicas: form.notas_tecnicas,
       prioridad: form.prioridad,
+      columna: form.columna || undefined,
       asignado_a: form.asignado_a ? Number(form.asignado_a) : null,
       costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : null,
       costo_final: form.costo_final ? Number(form.costo_final) : null,
@@ -264,11 +274,19 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                     </div>
                     <div className="form-row">
                       <div className="form-group">
+                        <label><i className="fas fa-columns"></i> Columna / Estado</label>
+                        <select value={form.columna} onChange={e => setForm({ ...form, columna: e.target.value })}>
+                          {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
+                        </select>
+                      </div>
+                      <div className="form-group">
                         <label><i className="fas fa-flag"></i> Prioridad</label>
                         <select value={form.prioridad} onChange={e => setForm({ ...form, prioridad: e.target.value })}>
                           {PRIORIDADES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                         </select>
                       </div>
+                    </div>
+                    <div className="form-row">
                       <div className="form-group">
                         <label><i className="fas fa-user-cog"></i> Asignado a</label>
                         <select value={form.asignado_a} onChange={e => setForm({ ...form, asignado_a: e.target.value })}>
@@ -411,9 +429,9 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                           <div className="timeline-dot"></div>
                           <div className="timeline-content">
                             <div className="timeline-row">
-                              <span className="timeline-from">{h.old_status || '-'}</span>
+                              <span className="timeline-from">{colTitleMap[h.old_status || ''] || h.old_status || '-'}</span>
                               <i className="fas fa-arrow-right"></i>
-                              <span className="timeline-to">{h.new_status}</span>
+                              <span className="timeline-to">{colTitleMap[h.new_status] || h.new_status}</span>
                             </div>
                             <div className="timeline-meta">
                               <span><i className="fas fa-clock"></i> {h.changed_at?.slice(0, 16).replace('T', ' ')}</span>

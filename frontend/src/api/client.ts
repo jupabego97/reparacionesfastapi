@@ -405,7 +405,7 @@ export const api = {
   },
   async reorderTarjetaMedia(id: number, items: { id: number; position: number }[]): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/reorder`, {
-      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(items),
+      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ items }),
     });
     await ensureOk(res);
   },

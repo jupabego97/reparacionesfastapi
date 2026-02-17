@@ -47,10 +47,11 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
   const isBlocked = !!t.bloqueada;
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
 
-  // Column arrow navigation
+  // Column arrow navigation (disabled for blocked cards)
+  const canMove = !isBlocked;
   const colIndex = columnas.findIndex(c => c.key === t.columna);
-  const prevCol = colIndex > 0 ? columnas[colIndex - 1] : null;
-  const nextCol = colIndex < columnas.length - 1 ? columnas[colIndex + 1] : null;
+  const prevCol = canMove && colIndex > 0 ? columnas[colIndex - 1] : null;
+  const nextCol = canMove && colIndex < columnas.length - 1 ? columnas[colIndex + 1] : null;
 
   if (compact) {
     const compactThumb = t.cover_thumb_url || t.imagen_url || '';
