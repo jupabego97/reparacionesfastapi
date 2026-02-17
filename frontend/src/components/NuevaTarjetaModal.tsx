@@ -72,14 +72,6 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     };
   }, []);
 
-  // En móvil: ir directo a la cámara al abrir, sin menú de opciones
-  useEffect(() => {
-    if (isMobile && step === 'capture') {
-      setCameraActive(true);
-      startCamera();
-    }
-  }, [isMobile, step]);
-
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -89,6 +81,14 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
       setCameraActive(false); // Mostrar opciones subir/sin imagen si falla
     }
   };
+
+  // En móvil: ir directo a la cámara al abrir, sin menú de opciones
+  useEffect(() => {
+    if (isMobile && step === 'capture') {
+      setCameraActive(true);
+      startCamera();
+    }
+  }, [isMobile, step]);
 
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) return;
