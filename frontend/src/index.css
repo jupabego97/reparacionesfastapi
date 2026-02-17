@@ -2129,13 +2129,17 @@ body {
 
 .camera-fullscreen.capture-step {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 2100;
   background: #000;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  box-sizing: border-box;
 }
 
 .camera-fullscreen .camera-container {
@@ -2428,6 +2432,19 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .edit-form .form-group input,
+  .edit-form .form-group select,
+  .edit-form .form-group textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px;
+  }
+
+  .edit-form .form-group textarea {
+    min-height: 80px;
+    resize: vertical;
+  }
+
   .capture-options {
     grid-template-columns: 1fr;
   }
@@ -2435,10 +2452,9 @@ body {
   /* Modals: full-screen on mobile */
   .modal-pro {
     max-width: 100vw;
-    max-height: 100vh;
     max-height: 100dvh;
     width: 100%;
-    height: 100%;
+    height: 100dvh;
     border-radius: 0;
     animation: slideUp 0.25s ease-out;
   }
@@ -2453,6 +2469,8 @@ body {
 
   .modal-pro-body {
     padding: 1rem;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
   }
 
   .modal-pro-footer {
@@ -2652,15 +2670,16 @@ body {
     width: 100vw;
   }
 
-  /* Mobile FAB: muy grande y ancho, safe-area */
+  /* Mobile FAB: muy grande y prominente, safe-area */
   .mobile-fab-new {
     position: fixed;
-    left: 16px;
-    right: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     z-index: 1400;
-    height: 80px;
-    padding: 0 2rem;
+    height: 96px;
+    min-height: 96px;
+    padding: 0 2.5rem;
     border: none;
     border-radius: 16px;
     background: linear-gradient(135deg, var(--accent), var(--accent-hover));
@@ -2670,7 +2689,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 0.75rem;
-    font-size: 1.35rem;
+    font-size: 1.5rem;
     font-weight: 700;
     cursor: pointer;
     transition: transform 0.18s ease, box-shadow 0.18s ease;
@@ -2678,7 +2697,7 @@ body {
   }
 
   .mobile-fab-new i {
-    font-size: 1.75rem;
+    font-size: 2rem;
   }
 
   .mobile-fab-new:active {
@@ -2718,15 +2737,7 @@ body {
     max-height: calc(100dvh - 140px);
   }
 
-  .modal-pro {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .modal-pro-header,
-  .modal-pro-footer {
-    width: 100%;
-  }
+  /* Mantener column para que formulario y camara se adapten correctamente */
 }
 
 /* --- Small phones (≤380px) --- */
