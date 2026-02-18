@@ -701,7 +701,9 @@ body {
   border: 1px solid var(--border);
   position: relative;
   overflow: hidden;
-  transition: var(--transition);
+  transition: box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: default;
 }
 
@@ -3738,9 +3740,6 @@ body {
   }
 }
 
-.tarjeta-card {
-  animation: cardEnter 0.3s ease-out;
-}
 
 /* ==================== View Transition ==================== */
 .view-container {
