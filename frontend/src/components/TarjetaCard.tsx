@@ -184,18 +184,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
       )}
 
       {(t.cover_thumb_url || t.imagen_url) && (
-        <img
-          src={t.cover_thumb_url || t.imagen_url || ''}
-          alt="Equipo"
-          className="tarjeta-thumbnail"
-          loading="lazy"
-          title="Ver foto completa"
-          onClick={e => {
-            e.stopPropagation();
-            const url = t.imagen_url || t.cover_thumb_url;
-            if (url) window.open(url, '_blank', 'noopener,noreferrer');
-          }}
-        />
+        <img src={t.cover_thumb_url || t.imagen_url || ''} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
       )}
 
       <div className="tarjeta-footer">
