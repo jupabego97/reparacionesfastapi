@@ -29,6 +29,7 @@ function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onM
     transform: disableDrag ? undefined : CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
+    flexShrink: 0,
   };
 
   return (
