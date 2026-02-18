@@ -579,7 +579,9 @@ body {
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  height: calc(100vh - 220px);
   max-height: calc(100vh - 220px);
+  overflow: hidden;
   transition: var(--transition);
 }
 
@@ -865,7 +867,12 @@ body {
   object-fit: cover;
   border-radius: var(--radius-sm);
   margin: 0.3rem 0.75rem;
-  cursor: pointer;
+  cursor: zoom-in;
+  transition: opacity 0.15s;
+}
+
+.tarjeta-thumbnail:hover {
+  opacity: 0.88;
 }
 
 .tarjeta-thumbnail-placeholder {
@@ -3638,8 +3645,28 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* ==================== Mobile Card Arrows ==================== */
+/* ==================== Card Navigation Arrows (all viewports) ==================== */
 .tarjeta-mobile-arrows {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.tarjeta-mobile-arrows .btn-col-arrow {
+  flex: 1;
+  min-height: 30px;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border-radius: var(--radius-sm);
+}
+
+/* Hide footer arrows on desktop since we have the dedicated row */
+.tarjeta-footer-right .btn-col-arrow {
   display: none;
 }
 
