@@ -1025,6 +1025,62 @@ body {
   transform: scale(0.92);
 }
 
+/* Flechas de columna: overlay fijo sobre la tarjeta */
+.tarjeta-col-arrows-overlay {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  gap: 0.25rem;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.tarjeta-card:hover .tarjeta-col-arrows-overlay,
+.tarjeta-card:focus-within .tarjeta-col-arrows-overlay {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.btn-col-arrow-overlay {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid var(--arrow-color, var(--border));
+  color: var(--arrow-color, var(--text-secondary));
+  background: var(--bg-card);
+  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.1s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+}
+
+.btn-col-arrow-overlay:hover {
+  background: var(--arrow-color, var(--accent));
+  color: #fff;
+  border-color: var(--arrow-color, var(--accent));
+  transform: scale(1.1);
+}
+
+.btn-col-arrow-overlay:active {
+  transform: scale(0.92);
+}
+
+/* En móvil las flechas overlay siempre visibles (sin hover) */
+@media (max-width: 768px) {
+  .tarjeta-col-arrows-overlay {
+    opacity: 1;
+    pointer-events: auto;
+    top: 0.35rem;
+    right: 0.35rem;
+  }
+}
+
 /* Compact card */
 .tarjeta-card.compact .tarjeta-compact-row {
   display: flex;
