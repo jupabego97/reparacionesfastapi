@@ -53,7 +53,7 @@ function DroppableColumn({ id, children }: { id: string; children: React.ReactNo
 }
 
 const PRIORITY_LABELS: Record<string, string> = { alta: 'Alta', media: 'Media', baja: 'Baja' };
-const VIRTUALIZATION_THRESHOLD = 40;
+const VIRTUALIZATION_THRESHOLD = 500;
 const CARD_ESTIMATED_HEIGHT = 220;
 
 function VirtualizedColumnList({
