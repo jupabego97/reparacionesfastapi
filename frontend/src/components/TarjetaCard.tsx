@@ -83,22 +83,24 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           <div className="tarjeta-compact-actions">
             {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
             {whatsUrl && <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-sm" onClick={e => e.stopPropagation()} title="WhatsApp"><i className="fab fa-whatsapp"></i></a>}
-            <div className="tarjeta-compact-arrows">
-              {prevCol && (
-                <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
-                  title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}
-                  style={{ borderColor: prevCol.color, color: prevCol.color }}>
+            {canMove && columnas.length > 1 && (
+              <div className="tarjeta-compact-arrows">
+                <button className="btn-action btn-col-arrow btn-col-arrow-sm"
+                  onClick={e => { e.stopPropagation(); if (prevCol) onMove(t.id, prevCol.key); }}
+                  title={prevCol ? `Mover a ${prevCol.title}` : ''} aria-label={prevCol ? `Mover a ${prevCol.title}` : ''}
+                  style={prevCol ? { borderColor: prevCol.color, color: prevCol.color } : { visibility: 'hidden' }}
+                  disabled={!prevCol}>
                   <i className="fas fa-chevron-left"></i>
                 </button>
-              )}
-              {nextCol && (
-                <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
-                  title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}
-                  style={{ borderColor: nextCol.color, color: nextCol.color }}>
+                <button className="btn-action btn-col-arrow btn-col-arrow-sm"
+                  onClick={e => { e.stopPropagation(); if (nextCol) onMove(t.id, nextCol.key); }}
+                  title={nextCol ? `Mover a ${nextCol.title}` : ''} aria-label={nextCol ? `Mover a ${nextCol.title}` : ''}
+                  style={nextCol ? { borderColor: nextCol.color, color: nextCol.color } : { visibility: 'hidden' }}
+                  disabled={!nextCol}>
                   <i className="fas fa-chevron-right"></i>
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -201,30 +203,32 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
       )}
 
       {/* Flechas de columna: overlay fijo en esquina superior derecha */}
-      {(prevCol || nextCol) && (
+      {canMove && columnas.length > 1 && (
         <div className="tarjeta-col-arrows-overlay">
-          {prevCol && (
-            <button
-              className="btn-col-arrow-overlay"
-              onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
-              title={`← ${prevCol.title}`}
-              aria-label={`Mover a ${prevCol.title}`}
-              style={{ '--arrow-color': prevCol.color } as React.CSSProperties}
-            >
-              <i className="fas fa-chevron-left"></i>
-            </button>
-          )}
-          {nextCol && (
-            <button
-              className="btn-col-arrow-overlay"
-              onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
-              title={`${nextCol.title} →`}
-              aria-label={`Mover a ${nextCol.title}`}
-              style={{ '--arrow-color': nextCol.color } as React.CSSProperties}
-            >
-              <i className="fas fa-chevron-right"></i>
-            </button>
-          )}
+          <button
+            className="btn-col-arrow-overlay"
+            onClick={e => { e.stopPropagation(); if (prevCol) onMove(t.id, prevCol.key); }}
+            title={prevCol ? `← ${prevCol.title}` : ''}
+            aria-label={prevCol ? `Mover a ${prevCol.title}` : ''}
+            style={prevCol
+              ? { '--arrow-color': prevCol.color } as React.CSSProperties
+              : { visibility: 'hidden' } as React.CSSProperties}
+            disabled={!prevCol}
+          >
+            <i className="fas fa-chevron-left"></i>
+          </button>
+          <button
+            className="btn-col-arrow-overlay"
+            onClick={e => { e.stopPropagation(); if (nextCol) onMove(t.id, nextCol.key); }}
+            title={nextCol ? `${nextCol.title} →` : ''}
+            aria-label={nextCol ? `Mover a ${nextCol.title}` : ''}
+            style={nextCol
+              ? { '--arrow-color': nextCol.color } as React.CSSProperties
+              : { visibility: 'hidden' } as React.CSSProperties}
+            disabled={!nextCol}
+          >
+            <i className="fas fa-chevron-right"></i>
+          </button>
         </div>
       )}
 
