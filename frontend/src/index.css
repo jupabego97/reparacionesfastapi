@@ -1071,13 +1071,10 @@ body {
   transform: scale(0.92);
 }
 
-/* En móvil las flechas overlay siempre visibles (sin hover) */
+/* En móvil ocultar flechas overlay */
 @media (max-width: 768px) {
   .tarjeta-col-arrows-overlay {
-    opacity: 1;
-    pointer-events: auto;
-    top: 0.35rem;
-    right: 0.35rem;
+    display: none;
   }
 }
 
