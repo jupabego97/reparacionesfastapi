@@ -279,6 +279,18 @@ export default function App() {
     return () => window.removeEventListener('click', close);
   }, []);
 
+  // Resetear a pantalla de inicio al volver de background (solo móvil)
+  useEffect(() => {
+    if (!isMobile) return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        setMobileHome(true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [isMobile]);
+
   const saveCurrentView = useCallback(() => {
     const nextIndex = (preferences.saved_views?.length || 0) + 1;
     const nextView: SavedView = {
