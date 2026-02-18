@@ -20,14 +20,17 @@ interface Props {
   disableDrag?: boolean;
 }
 
+const noLayoutAnimation = () => false;
+
 function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock, disableDrag }: Props) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isSorting } = useSortable({
     id: tarjeta.id,
+    animateLayoutChanges: noLayoutAnimation,
   });
 
   const style = {
     transform: disableDrag ? undefined : CSS.Transform.toString(transform),
-    transition,
+    transition: isSorting ? transition : undefined,
     opacity: isDragging ? 0.4 : 1,
     flexShrink: 0,
   };
