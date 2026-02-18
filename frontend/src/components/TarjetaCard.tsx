@@ -68,7 +68,14 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
             <span className="drag-handle-compact" {...dragHandleProps} onClick={e => e.stopPropagation()}><i className="fas fa-grip-vertical"></i></span>
           )}
           {compactThumb && (
-            <img src={compactThumb} alt="Equipo" className="tarjeta-compact-thumb" loading="lazy" />
+            <img
+              src={compactThumb}
+              alt="Equipo"
+              className="tarjeta-compact-thumb"
+              loading="lazy"
+              onClick={e => { e.stopPropagation(); window.open(t.imagen_url || t.cover_thumb_url || '', '_blank', 'noopener,noreferrer'); }}
+              style={{ cursor: 'pointer' }}
+            />
           )}
           <span className="priority-dot" style={{ background: prio.color }}></span>
           <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
@@ -184,7 +191,41 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
       )}
 
       {(t.cover_thumb_url || t.imagen_url) && (
-        <img src={t.cover_thumb_url || t.imagen_url || ''} alt="Equipo" className="tarjeta-thumbnail" loading="lazy" onClick={() => onEdit(t)} />
+        <img
+          src={t.cover_thumb_url || t.imagen_url || ''}
+          alt="Equipo"
+          className="tarjeta-thumbnail"
+          loading="lazy"
+          onClick={e => { e.stopPropagation(); window.open(t.imagen_url || t.cover_thumb_url || '', '_blank', 'noopener,noreferrer'); }}
+        />
+      )}
+
+      {/* Flechas de columna: overlay fijo en esquina superior derecha */}
+      {(prevCol || nextCol) && (
+        <div className="tarjeta-col-arrows-overlay">
+          {prevCol && (
+            <button
+              className="btn-col-arrow-overlay"
+              onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
+              title={`← ${prevCol.title}`}
+              aria-label={`Mover a ${prevCol.title}`}
+              style={{ '--arrow-color': prevCol.color } as React.CSSProperties}
+            >
+              <i className="fas fa-chevron-left"></i>
+            </button>
+          )}
+          {nextCol && (
+            <button
+              className="btn-col-arrow-overlay"
+              onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
+              title={`${nextCol.title} →`}
+              aria-label={`Mover a ${nextCol.title}`}
+              style={{ '--arrow-color': nextCol.color } as React.CSSProperties}
+            >
+              <i className="fas fa-chevron-right"></i>
+            </button>
+          )}
+        </div>
       )}
 
       <div className="tarjeta-footer">
@@ -211,41 +252,8 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar" aria-label="Editar tarjeta">
             <i className="fas fa-pen"></i>
           </button>
-          {prevCol && (
-            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
-              title={`Mover a ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}
-              style={{ borderColor: prevCol.color, color: prevCol.color }}>
-              <i className="fas fa-chevron-left"></i>
-            </button>
-          )}
-          {nextCol && (
-            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
-              title={`Mover a ${nextCol.title}`} aria-label={`Mover a ${nextCol.title}`}
-              style={{ borderColor: nextCol.color, color: nextCol.color }}>
-              <i className="fas fa-chevron-right"></i>
-            </button>
-          )}
         </div>
       </div>
-
-      {(prevCol || nextCol) && (
-        <div className="tarjeta-mobile-arrows">
-          {prevCol ? (
-            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
-              title={`← ${prevCol.title}`} aria-label={`Mover a ${prevCol.title}`}
-              style={{ borderColor: prevCol.color, color: prevCol.color }}>
-              <i className="fas fa-chevron-left"></i> {prevCol.title}
-            </button>
-          ) : <span />}
-          {nextCol ? (
-            <button className="btn-action btn-col-arrow" onClick={e => { e.stopPropagation(); onMove(t.id, nextCol.key); }}
-              title={`${nextCol.title} →`} aria-label={`Mover a ${nextCol.title}`}
-              style={{ borderColor: nextCol.color, color: nextCol.color }}>
-              {nextCol.title} <i className="fas fa-chevron-right"></i>
-            </button>
-          ) : <span />}
-        </div>
-      )}
     </div>
   );
 }
