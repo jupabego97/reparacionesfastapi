@@ -10,7 +10,9 @@ export function toWhatsAppNumber(raw: string | null | undefined): string {
   return ''
 }
 
-export function toWhatsAppUrl(raw: string | null | undefined): string | null {
+export function toWhatsAppUrl(raw: string | null | undefined, text?: string): string | null {
   const num = toWhatsAppNumber(raw)
-  return num ? `https://wa.me/${num}` : null
+  if (!num) return null
+  const base = `whatsapp://send?phone=${num}`
+  return text ? `${base}&text=${encodeURIComponent(text)}` : base
 }
