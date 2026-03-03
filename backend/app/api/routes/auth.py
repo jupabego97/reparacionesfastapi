@@ -9,7 +9,13 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.user import DeviceSession, User
-from app.schemas.auth import DeviceLoginRequest, LoginRequest, PasswordChange, RegisterRequest, UserUpdate
+from app.schemas.auth import (
+    DeviceLoginRequest,
+    LoginRequest,
+    PasswordChange,
+    RegisterRequest,
+    UserUpdate,
+)
 from app.services.auth_service import (
     create_token,
     get_current_user,
