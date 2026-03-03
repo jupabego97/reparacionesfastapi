@@ -291,13 +291,31 @@ async function ensureOk(res: Response): Promise<void> {
 
 export const api = {
   // --- Auth ---
-  async login(username: string, password: string): Promise<{ access_token: string; user: UserInfo }> {
+  async login(username: string, password: string): Promise<{ access_token: string; device_token: string; user: UserInfo }> {
+    const deviceName = `${navigator.userAgent.slice(0, 100)}`;
     const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Name': deviceName },
       body: JSON.stringify({ username, password }),
     });
     await ensureOk(res);
     return res.json();
+  },
+  async deviceLogin(deviceToken: string): Promise<{ access_token: string; device_token: string; user: UserInfo }> {
+    const deviceName = `${navigator.userAgent.slice(0, 100)}`;
+    const res = await fetch(`${API_BASE}/api/auth/device-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_token: deviceToken, device_name: deviceName }),
+    });
+    await ensureOk(res);
+    return res.json();
+  },
+  async deviceLogout(deviceToken: string): Promise<void> {
+    await fetch(`${API_BASE}/api/auth/device-logout`, {
+      method: 'DELETE',
+      headers: { ...authHeaders(), 'X-Device-Token': deviceToken },
+    });
   },
   async register(data: { username: string; password: string; full_name?: string; email?: string; role?: string; avatar_color?: string }): Promise<{ access_token: string; user: UserInfo }> {
     const res = await fetch(`${API_BASE}/api/auth/register`, {

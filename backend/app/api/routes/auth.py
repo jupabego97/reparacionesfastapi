@@ -1,4 +1,5 @@
 """Rutas de autenticacion y gestion de usuarios."""
+import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -7,8 +8,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.models.user import User
-from app.schemas.auth import LoginRequest, PasswordChange, RegisterRequest, UserUpdate
+from app.models.user import DeviceSession, User
+from app.schemas.auth import (
+    DeviceLoginRequest,
+    LoginRequest,
+    PasswordChange,
+    RegisterRequest,
+    UserUpdate,
+)
 from app.services.auth_service import (
     create_token,
     get_current_user,
@@ -31,18 +38,81 @@ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Usuario desactivado")
 
     user.last_login = datetime.now(UTC)
+
+    # Crear o reutilizar sesión de dispositivo
+    device_name = request.headers.get("X-Device-Name")
+    device_token = str(uuid.uuid4())
+    device_session = DeviceSession(
+        user_id=user.id,
+        device_token=device_token,
+        device_name=device_name,
+    )
+    db.add(device_session)
     db.commit()
 
     settings = get_settings()
     return {
         "access_token": create_token(user),
         "token_type": "bearer",
+        "device_token": device_token,
         "user": user.to_dict(),
         "session": {
             "exp_minutes": settings.jwt_expire_minutes,
             "role": user.role,
         },
     }
+
+
+@router.post("/device-login")
+@limiter.limit("30 per minute")
+def device_login(request: Request, data: DeviceLoginRequest, db: Session = Depends(get_db)):
+    """Refresca el JWT usando el token persistente del dispositivo, sin contraseña."""
+    session = (
+        db.query(DeviceSession)
+        .filter(DeviceSession.device_token == data.device_token, DeviceSession.is_active.is_(True))
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=401, detail="Token de dispositivo inválido o revocado")
+
+    user = db.query(User).filter(User.id == session.user_id, User.is_active.is_(True)).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
+
+    # Actualizar timestamp de uso
+    session.last_used_at = datetime.now(UTC)
+    if data.device_name:
+        session.device_name = data.device_name
+    user.last_login = datetime.now(UTC)
+    db.commit()
+
+    settings = get_settings()
+    return {
+        "access_token": create_token(user),
+        "token_type": "bearer",
+        "device_token": data.device_token,
+        "user": user.to_dict(),
+        "session": {
+            "exp_minutes": settings.jwt_expire_minutes,
+            "role": user.role,
+        },
+    }
+
+
+@router.delete("/device-logout")
+def device_logout(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Revoca el device token del dispositivo actual (cierre de sesión permanente)."""
+    device_token = request.headers.get("X-Device-Token")
+    if device_token:
+        session = (
+            db.query(DeviceSession)
+            .filter(DeviceSession.device_token == device_token, DeviceSession.user_id == user.id)
+            .first()
+        )
+        if session:
+            session.is_active = False
+            db.commit()
+    return {"message": "Sesión de dispositivo revocada"}
 
 
 @router.post("/register", status_code=201)

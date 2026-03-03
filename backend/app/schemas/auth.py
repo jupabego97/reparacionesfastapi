@@ -34,3 +34,8 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     old_password: str
     new_password: str = Field(..., min_length=4, max_length=128)
+
+
+class DeviceLoginRequest(BaseModel):
+    device_token: str = Field(..., min_length=36, max_length=36)  # UUID v4
+    device_name: str | None = Field(default=None, max_length=200)

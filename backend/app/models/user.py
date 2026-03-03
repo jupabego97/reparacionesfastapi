@@ -5,6 +5,20 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Text
 from app.core.database import Base
 
 
+class DeviceSession(Base):
+    """Token persistente por dispositivo — permite no volver a iniciar sesión."""
+
+    __tablename__ = "device_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_token = Column(Text, unique=True, nullable=False, index=True)  # UUID v4
+    device_name = Column(Text, nullable=True)   # p.ej. "Chrome en Windows"
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    last_used_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
 class User(Base):
     __tablename__ = "users"
 
