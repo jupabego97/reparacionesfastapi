@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type { TarjetaBoardItem, KanbanColumn } from '../api/client';
-import { toWhatsAppUrl } from '../utils/whatsappUrl';
+import { toWhatsAppUrl, openWhatsAppSmart } from '../utils/whatsappUrl';
 
 interface Props {
   tarjeta: TarjetaBoardItem;
@@ -83,7 +83,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           {t.asignado_nombre && <span className="assigned-badge" title={t.asignado_nombre}>{t.asignado_nombre[0]}</span>}
           <div className="tarjeta-compact-actions">
             {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
-            {whatsUrl && <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-sm" onClick={e => e.stopPropagation()} title="WhatsApp"><i className="fab fa-whatsapp"></i></a>}
+            {whatsUrl && <button className="btn-wa-sm" onClick={e => { e.stopPropagation(); openWhatsAppSmart(t.whatsapp, `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim()); }} title="WhatsApp"><i className="fab fa-whatsapp"></i></button>}
             <div className="tarjeta-compact-arrows">
               {prevCol && (
                 <button className="btn-action btn-col-arrow btn-col-arrow-sm" onClick={e => { e.stopPropagation(); onMove(t.id, prevCol.key); }}
@@ -246,9 +246,9 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
         </div>
         <div className="tarjeta-footer-right">
           {whatsUrl && (
-            <a href={whatsUrl} target="_blank" rel="noopener noreferrer" className="btn-wa-action btn-wa-big" title="Escribir por WhatsApp" onClick={e => e.stopPropagation()}>
+            <button className="btn-wa-action btn-wa-big" title="Escribir por WhatsApp" onClick={e => { e.stopPropagation(); openWhatsAppSmart(t.whatsapp, `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim()); }}>
               <i className="fab fa-whatsapp"></i> WhatsApp
-            </a>
+            </button>
           )}
           <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar" aria-label="Editar tarjeta">
             <i className="fas fa-pen"></i>
