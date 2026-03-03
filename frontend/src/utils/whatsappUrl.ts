@@ -13,6 +13,6 @@ export function toWhatsAppNumber(raw: string | null | undefined): string {
 export function toWhatsAppUrl(raw: string | null | undefined, text?: string): string | null {
   const num = toWhatsAppNumber(raw)
   if (!num) return null
-  const base = `whatsapp://send?phone=${num}`
-  return text ? `${base}&text=${encodeURIComponent(text)}` : base
+  const base = `https://wa.me/${num}`
+  return text ? `${base}?text=${encodeURIComponent(text)}` : base
 }

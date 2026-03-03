@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { TarjetaBoardItem, KanbanColumn } from '../api/client';
+import { toWhatsAppUrl } from '../utils/whatsappUrl';
 
 interface Props {
   tarjeta: TarjetaBoardItem;
@@ -40,10 +41,10 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
   const daysColor = timeColor(t.dias_en_columna || 0);
-  const whatsNum = t.whatsapp ? t.whatsapp.replace(/\D/g, '') : null;
-  const whatsUrl = whatsNum
-    ? `whatsapp://send?phone=${whatsNum}&text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim())}`
-    : null;
+  const whatsUrl = toWhatsAppUrl(
+    t.whatsapp,
+    `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim(),
+  );
   const isBlocked = !!t.bloqueada;
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
 
