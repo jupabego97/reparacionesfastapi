@@ -42,7 +42,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
   const daysColor = timeColor(t.dias_en_columna || 0);
   const whatsNum = t.whatsapp ? t.whatsapp.replace(/\D/g, '') : null;
   const whatsUrl = whatsNum
-    ? `https://wa.me/${whatsNum}?text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim())}`
+    ? `whatsapp://send?phone=${whatsNum}&text=${encodeURIComponent(`Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim())}`
     : null;
   const isBlocked = !!t.bloqueada;
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
