@@ -34,15 +34,17 @@ def wrap_with_cors_fallback(app, origin_regex: str | None):
             await send({"type": "http.response.body", "body": b""})
             return
 
-        # Peticiones normales → inyectar headers CORS en la respuesta
+        # Peticiones normales → inyectar/reemplazar headers CORS en la respuesta.
+        # Reemplazamos también el wildcard "*" que algunos servidores (ej. python-socketio)
+        # emiten por defecto, ya que "*" no funciona con credenciales y es menos específico.
         async def send_wrapper(message):
             if message["type"] == "http.response.start" and allowed and origin:
-                headers = list(message.get("headers", []))
-                has_acao = any(h[0].lower() == b"access-control-allow-origin" for h in headers)
-                if not has_acao:
-                    headers.append((b"access-control-allow-origin", origin.encode()))
+                headers = [(k, v) for k, v in message.get("headers", [])
+                           if k.lower() != b"access-control-allow-origin"]
+                headers.append((b"access-control-allow-origin", origin.encode()))
+                if not any(k.lower() == b"access-control-allow-credentials" for k, _ in headers):
                     headers.append((b"access-control-allow-credentials", b"true"))
-                    message = {**message, "headers": headers}
+                message = {**message, "headers": headers}
             await send(message)
 
         await app(scope, receive, send_wrapper)
