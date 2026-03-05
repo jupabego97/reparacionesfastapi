@@ -1,3 +1,4 @@
+import re
 import socketio
 from loguru import logger
 
@@ -6,13 +7,19 @@ from app.core.config import get_settings
 settings = get_settings()
 transports = ["polling"] if settings.socketio_safe_mode else ["websocket", "polling"]
 origins, origin_regex = settings.get_cors_origins()
-# Socket.IO no soporta regex; usa lista explícita o "*"
-cors_sio: list[str] | str
+# Socket.IO soporta callable desde v5.x; usamos uno basado en regex cuando no hay lista explícita
+cors_sio: list[str] | str | object
 if origin_regex:
-    logger.info(f"CORS fallback: regex {origin_regex} (Socket.IO requerirá ALLOWED_ORIGINS explícito)")
-    cors_sio = "*"  # No funciona con credenciales; ALLOWED_ORIGINS recomendado para Socket.IO
+    _pattern = re.compile(origin_regex)
+    def cors_sio(origin):  # type: ignore[misc]
+        result = bool(_pattern.fullmatch(origin)) if origin else False
+        if not result:
+            logger.warning(f"Socket.IO: origen rechazado por CORS: {origin!r}")
+        return result
+    logger.info(f"Socket.IO CORS: regex callable ({origin_regex})")
 else:
     cors_sio = origins
+    logger.info(f"Socket.IO CORS: lista explícita {origins!r}")
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins=cors_sio,

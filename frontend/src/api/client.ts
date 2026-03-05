@@ -284,16 +284,61 @@ export async function parseApiError(res: Response, rawText?: string): Promise<Ap
   }
 }
 
+// Bandera para evitar múltiples refreshes simultáneos
+let _refreshingToken: Promise<string | null> | null = null;
+
+async function refreshTokenIfPossible(): Promise<string | null> {
+  if (_refreshingToken) return _refreshingToken;
+  const deviceToken = localStorage.getItem('device_token');
+  if (!deviceToken) return null;
+  _refreshingToken = fetch(`${API_BASE}/api/auth/device-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_token: deviceToken, device_name: navigator.userAgent.slice(0, 100) }),
+  })
+    .then(r => r.ok ? r.json() : null)
+    .then((data: { access_token: string; device_token: string } | null) => {
+      if (!data) { localStorage.removeItem('device_token'); return null; }
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('device_token', data.device_token);
+      return data.access_token;
+    })
+    .catch(() => null)
+    .finally(() => { _refreshingToken = null; });
+  return _refreshingToken;
+}
+
 async function ensureOk(res: Response): Promise<void> {
   if (res.ok) return;
   throw await parseApiError(res);
+}
+
+// fetchWithAuth: igual que fetch pero reintenta una vez si recibe 401,
+// intentando refrescar el token con el device_token guardado.
+async function fetchWithAuth(input: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(input, init);
+  if (res.status !== 401) return res;
+
+  const newToken = await refreshTokenIfPossible();
+  if (!newToken) return res; // no hay device_token, devuelve el 401 original
+
+  // Reintenta con el nuevo token
+  const newInit: RequestInit = {
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string>),
+      Authorization: `Bearer ${newToken}`,
+    },
+  };
+  res = await fetch(input, newInit);
+  return res;
 }
 
 export const api = {
   // --- Auth ---
   async login(username: string, password: string): Promise<{ access_token: string; device_token: string; user: UserInfo }> {
     const deviceName = `${navigator.userAgent.slice(0, 100)}`;
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Device-Name': deviceName },
       body: JSON.stringify({ username, password }),
@@ -303,7 +348,7 @@ export const api = {
   },
   async deviceLogin(deviceToken: string): Promise<{ access_token: string; device_token: string; user: UserInfo }> {
     const deviceName = `${navigator.userAgent.slice(0, 100)}`;
-    const res = await fetch(`${API_BASE}/api/auth/device-login`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/device-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ device_token: deviceToken, device_name: deviceName }),
@@ -312,13 +357,13 @@ export const api = {
     return res.json();
   },
   async deviceLogout(deviceToken: string): Promise<void> {
-    await fetch(`${API_BASE}/api/auth/device-logout`, {
+    await fetchWithAuth(`${API_BASE}/api/auth/device-logout`, {
       method: 'DELETE',
       headers: { ...authHeaders(), 'X-Device-Token': deviceToken },
     });
   },
   async register(data: { username: string; password: string; full_name?: string; email?: string; role?: string; avatar_color?: string }): Promise<{ access_token: string; user: UserInfo }> {
-    const res = await fetch(`${API_BASE}/api/auth/register`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
@@ -326,12 +371,12 @@ export const api = {
     return res.json();
   },
   async getMe(): Promise<UserInfo> {
-    const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async getUsers(): Promise<UserInfo[]> {
-    const res = await fetch(`${API_BASE}/api/auth/users`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/auth/users`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
@@ -348,19 +393,19 @@ export const api = {
     if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
     if (params?.cargador) search.set('cargador', params.cargador);
     if (params?.tag != null) search.set('tag', String(params.tag));
-    const res = await fetch(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas${search.toString() ? '?' + search : ''}`, {
       headers: authHeaders(),
     });
     await ensureOk(res);
     return res.json();
   },
   async getMyPreferences(): Promise<UserPreferences> {
-    const res = await fetch(`${API_BASE}/api/users/me/preferences`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/users/me/preferences`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async updateMyPreferences(data: UserPreferences): Promise<UserPreferences> {
-    const res = await fetch(`${API_BASE}/api/users/me/preferences`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/users/me/preferences`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
@@ -396,24 +441,24 @@ export const api = {
     if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
     if (params?.cargador) search.set('cargador', params.cargador);
     if (params?.tag != null) search.set('tag', String(params.tag));
-    const res = await fetch(`${API_BASE}/api/tarjetas?${search}`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas?${search}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async getTarjetaById(id: number): Promise<TarjetaDetail> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async getTarjetaMedia(id: number): Promise<TarjetaMediaItem[]> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/media`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async uploadTarjetaMedia(id: number, files: File[]): Promise<TarjetaMediaItem[]> {
     const form = new FormData();
     files.forEach(file => form.append('files', file));
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/media`, {
       method: 'POST',
       headers: authHeaders(),
       body: form,
@@ -422,98 +467,98 @@ export const api = {
     return res.json();
   },
   async reorderTarjetaMedia(id: number, items: { id: number; position: number }[]): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/reorder`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/media/reorder`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ items }),
     });
     await ensureOk(res);
   },
   async updateTarjetaMedia(id: number, mediaId: number, data: { is_cover?: boolean }): Promise<TarjetaMediaItem> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/${mediaId}`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/media/${mediaId}`, {
       method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
     return res.json();
   },
   async deleteTarjetaMedia(id: number, mediaId: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/media/${mediaId}`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/media/${mediaId}`, {
       method: 'DELETE', headers: authHeaders(),
     });
     await ensureOk(res);
   },
   async createTarjeta(data: TarjetaCreate): Promise<Tarjeta> {
-    const res = await fetch(`${API_BASE}/api/tarjetas`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
     return res.json();
   },
   async updateTarjeta(id: number, data: TarjetaUpdate): Promise<Tarjeta> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
     return res.json();
   },
   async deleteTarjeta(id: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
   async restoreTarjeta(id: number): Promise<Tarjeta> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/restore`, { method: 'PUT', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/restore`, { method: 'PUT', headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async batchUpdatePositions(items: { id: number; columna: string; posicion: number }[]): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/batch/positions`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/batch/positions`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ items }),
     });
     await ensureOk(res);
   },
   async getHistorial(id: number): Promise<{ id: number; tarjeta_id: number; old_status: string | null; new_status: string; changed_at: string | null; changed_by_name: string | null }[]> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/historial`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/historial`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async getTrash(): Promise<Tarjeta[]> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/trash/list`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/trash/list`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
 
   // --- Estadísticas ---
   async getEstadisticas(): Promise<object> {
-    const res = await fetch(`${API_BASE}/api/estadisticas`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/estadisticas`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
 
   // --- Columnas ---
   async getColumnas(): Promise<KanbanColumn[]> {
-    const res = await fetch(`${API_BASE}/api/columnas`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/columnas`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async createColumna(data: Partial<KanbanColumn>): Promise<KanbanColumn> {
-    const res = await fetch(`${API_BASE}/api/columnas`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
+    const res = await fetchWithAuth(`${API_BASE}/api/columnas`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
     await ensureOk(res);
     return res.json();
   },
   async updateColumna(id: number, data: Partial<KanbanColumn>): Promise<KanbanColumn> {
-    const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data) });
+    const res = await fetchWithAuth(`${API_BASE}/api/columnas/${id}`, { method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data) });
     await ensureOk(res);
     return res.json();
   },
   async deleteColumna(id: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/columnas/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/columnas/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
   async getKanbanRules(): Promise<KanbanRules> {
-    const res = await fetch(`${API_BASE}/api/kanban/rules`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/kanban/rules`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async updateKanbanRules(data: KanbanRules): Promise<KanbanRules> {
-    const res = await fetch(`${API_BASE}/api/kanban/rules`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/kanban/rules`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
@@ -522,91 +567,91 @@ export const api = {
 
   // --- Tags ---
   async getTags(): Promise<Tag[]> {
-    const res = await fetch(`${API_BASE}/api/tags`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tags`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async createTag(data: { name: string; color?: string }): Promise<Tag> {
-    const res = await fetch(`${API_BASE}/api/tags`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
+    const res = await fetchWithAuth(`${API_BASE}/api/tags`, { method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data) });
     await ensureOk(res);
     return res.json();
   },
   async deleteTag(id: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tags/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tags/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
   async addTagToTarjeta(tarjetaId: number, tagId: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'POST', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'POST', headers: authHeaders() });
     await ensureOk(res);
   },
   async removeTagFromTarjeta(tarjetaId: number, tagId: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/tags/${tagId}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
 
   // --- SubTasks ---
   async getSubTasks(tarjetaId: number): Promise<SubTask[]> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async createSubTask(tarjetaId: number, title: string): Promise<SubTask> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/subtasks`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ title }),
     });
     await ensureOk(res);
     return res.json();
   },
   async updateSubTask(id: number, data: { completed?: boolean; title?: string }): Promise<SubTask> {
-    const res = await fetch(`${API_BASE}/api/subtasks/${id}`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/subtasks/${id}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
     return res.json();
   },
   async deleteSubTask(id: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/subtasks/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/subtasks/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
 
   // --- Comments ---
   async getComments(tarjetaId: number): Promise<CommentItem[]> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async createComment(tarjetaId: number, content: string): Promise<CommentItem> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/comments`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ content }),
     });
     await ensureOk(res);
     return res.json();
   },
   async deleteComment(id: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/comments/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/comments/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
 
   // --- Notificaciones ---
   async getNotificaciones(unreadOnly = false): Promise<{ notifications: NotificationItem[]; unread_count: number }> {
-    const res = await fetch(`${API_BASE}/api/notificaciones?unread_only=${unreadOnly}`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/notificaciones?unread_only=${unreadOnly}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async markNotificationsRead(ids: number[]): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/notificaciones/mark-read`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/notificaciones/mark-read`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ ids }),
     });
     await ensureOk(res);
   },
   async markAllNotificationsRead(): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/notificaciones/mark-all-read`, { method: 'PUT', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/notificaciones/mark-all-read`, { method: 'PUT', headers: authHeaders() });
     await ensureOk(res);
   },
 
   // --- Multimedia ---
   async procesarImagen(imageData: string): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean; _partial?: boolean }> {
-    const res = await fetch(`${API_BASE}/api/procesar-imagen`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/procesar-imagen`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ image: imageData }),
     });
     const raw = await res.text();
@@ -625,7 +670,7 @@ export const api = {
     return { nombre: data.nombre ?? 'Cliente', telefono: data.telefono ?? '', tiene_cargador: !!data.tiene_cargador };
   },
   async transcribirAudio(formData: FormData): Promise<{ transcripcion: string }> {
-    const res = await fetch(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
@@ -634,14 +679,14 @@ export const api = {
     if (params.estado && params.estado !== 'todos') search.set('estado', params.estado)
     if (params.fecha_desde) search.set('fecha_desde', params.fecha_desde)
     if (params.fecha_hasta) search.set('fecha_hasta', params.fecha_hasta)
-    const res = await fetch(`${API_BASE}/api/exportar?${search}`, { headers: authHeaders() })
+    const res = await fetchWithAuth(`${API_BASE}/api/exportar?${search}`, { headers: authHeaders() })
     await ensureOk(res)
     return res.blob()
   },
 
   // --- Blocked cards ---
   async blockTarjeta(id: number, reason: string, userId?: number): Promise<Tarjeta> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/block`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/block`, {
       method: 'PATCH', headers: jsonHeaders(),
       body: JSON.stringify({ blocked: true, reason, user_id: userId }),
     });
@@ -649,7 +694,7 @@ export const api = {
     return res.json();
   },
   async unblockTarjeta(id: number): Promise<Tarjeta> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${id}/block`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/block`, {
       method: 'PATCH', headers: jsonHeaders(),
       body: JSON.stringify({ blocked: false }),
     });
@@ -659,7 +704,7 @@ export const api = {
 
   // --- Batch operations ---
   async batchOperation(ids: number[], action: string, value?: string | number, extra?: Record<string, unknown>): Promise<{ ok: boolean; updated: number; tarjetas: Tarjeta[] }> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/batch`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/batch`, {
       method: 'POST', headers: jsonHeaders(),
       body: JSON.stringify({ ids, action, value, ...extra }),
     });
@@ -669,7 +714,7 @@ export const api = {
 
   // --- Kanban metrics ---
   async getKanbanMetrics(dias = 30): Promise<KanbanMetrics> {
-    const res = await fetch(`${API_BASE}/api/metricas/kanban?dias=${dias}`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/metricas/kanban?dias=${dias}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
@@ -678,31 +723,31 @@ export const api = {
   async getActivityFeed(limit = 50, offset = 0, tarjetaId?: number): Promise<{ actividad: ActivityItem[]; total: number }> {
     let url = `${API_BASE}/api/actividad?limit=${limit}&offset=${offset}`;
     if (tarjetaId) url += `&tarjeta_id=${tarjetaId}`;
-    const res = await fetch(url, { headers: authHeaders() });
+    const res = await fetchWithAuth(url, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async getTarjetaTimeline(tarjetaId: number, cursor = 0, limit = 30): Promise<{ events: TimelineEvent[]; next_cursor: number | null; total: number }> {
-    const res = await fetch(`${API_BASE}/api/tarjetas/${tarjetaId}/timeline?cursor=${cursor}&limit=${limit}`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${tarjetaId}/timeline?cursor=${cursor}&limit=${limit}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
 
   // --- Card templates ---
   async getTemplates(): Promise<CardTemplateItem[]> {
-    const res = await fetch(`${API_BASE}/api/plantillas`, { headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/plantillas`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
   },
   async createTemplate(data: Omit<CardTemplateItem, 'id' | 'created_at'>): Promise<CardTemplateItem> {
-    const res = await fetch(`${API_BASE}/api/plantillas`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/plantillas`, {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(data),
     });
     await ensureOk(res);
     return res.json();
   },
   async deleteTemplate(id: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/plantillas/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const res = await fetchWithAuth(`${API_BASE}/api/plantillas/${id}`, { method: 'DELETE', headers: authHeaders() });
     await ensureOk(res);
   },
 };
