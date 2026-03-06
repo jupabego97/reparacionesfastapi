@@ -38,12 +38,14 @@ function unwrapSocketData<T>(payload: SocketEnvelope<T>): T {
   return payload as T;
 }
 
+const DEFAULT_FILTROS = { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '', orden_por: '', orden_dir: '' };
+
 function loadFilters() {
   try {
     const saved = localStorage.getItem('kanban-filters');
-    return saved ? JSON.parse(saved) : { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '' };
+    return saved ? { ...DEFAULT_FILTROS, ...JSON.parse(saved) } : DEFAULT_FILTROS;
   } catch {
-    return { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '' };
+    return DEFAULT_FILTROS;
   }
 }
 
@@ -107,6 +109,8 @@ async function fetchBoardCards(params: {
   asignado_a?: number;
   cargador?: string;
   tag?: number;
+  orden_por?: string;
+  orden_dir?: string;
 }): Promise<TarjetasBoardResponse> {
   return api.getTarjetasBoard({
     ...params,
@@ -182,8 +186,8 @@ export default function App() {
   });
 
   const boardQueryKey = useMemo(
-    () => ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag] as const,
-    [debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag],
+    () => ['tarjetas-board', debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag, filtros.orden_por, filtros.orden_dir] as const,
+    [debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag, filtros.orden_por, filtros.orden_dir],
   );
   const {
     data: boardData,
@@ -204,6 +208,8 @@ export default function App() {
       asignado_a: filtros.asignado_a ? Number(filtros.asignado_a) : undefined,
       cargador: filtros.cargador || undefined,
       tag: filtros.tag ? Number(filtros.tag) : undefined,
+      orden_por: filtros.orden_por || undefined,
+      orden_dir: filtros.orden_dir || undefined,
     }),
     initialPageParam: undefined,
     getNextPageParam: lastPage => lastPage.next_cursor ?? undefined,
@@ -318,7 +324,7 @@ export default function App() {
     setActiveSavedViewId(viewId);
     const selected = preferences.saved_views.find(v => v.id === viewId);
     if (!selected) return;
-    setFiltros(selected.filtros);
+    setFiltros({ ...DEFAULT_FILTROS, ...selected.filtros });
     setGroupBy(selected.groupBy);
     setCompactView(selected.compactView);
     setViewMode(selected.viewMode);
