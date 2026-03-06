@@ -164,6 +164,8 @@ export interface SavedView {
     asignado_a: string;
     cargador: string;
     tag: string;
+    orden_por: string;
+    orden_dir: string;
   };
   groupBy: string;
   compactView: boolean;
@@ -423,7 +425,9 @@ export const api = {
     prioridad?: string;
     asignado_a?: number;
     cargador?: string;
-    tag?: number
+    tag?: number;
+    orden_por?: string;
+    orden_dir?: string;
   }): Promise<TarjetasBoardResponse> {
     const search = new URLSearchParams();
     search.set('view', 'board');
@@ -441,6 +445,8 @@ export const api = {
     if (params?.asignado_a != null) search.set('asignado_a', String(params.asignado_a));
     if (params?.cargador) search.set('cargador', params.cargador);
     if (params?.tag != null) search.set('tag', String(params.tag));
+    if (params?.orden_por) search.set('orden_por', params.orden_por);
+    if (params?.orden_dir) search.set('orden_dir', params.orden_dir);
     const res = await fetchWithAuth(`${API_BASE}/api/tarjetas?${search}`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();

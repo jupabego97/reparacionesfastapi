@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, delete, exists, func, insert, or_, select, text
+from sqlalchemy import and_, asc, case, delete, desc, exists, func, insert, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer
 
@@ -373,6 +373,8 @@ def get_tarjetas(
     mode: str | None = Query(None),
     cursor: str | None = Query(None),
     include: str | None = Query(None),
+    orden_por: str | None = Query(None),
+    orden_dir: str | None = Query(None),
 ):
     include_image = light != 1
     board_mode = (view or "").lower() == "board"
@@ -420,7 +422,25 @@ def get_tarjetas(
             )
         )
 
-    q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
+    # Dynamic ordering
+    _dir = desc if (orden_dir or "asc").lower() == "desc" else asc
+    _priority_case = case(
+        (RepairCard.priority == "alta", 1),
+        (RepairCard.priority == "media", 2),
+        else_=3,
+    )
+    if orden_por == "fecha_ingreso":
+        q = q.order_by(_dir(RepairCard.ingresado_date))
+    elif orden_por == "prioridad":
+        q = q.order_by(_dir(_priority_case))
+    elif orden_por == "nombre_cliente":
+        q = q.order_by(_dir(RepairCard.owner_name))
+    elif orden_por == "fecha_limite":
+        q = q.order_by(_dir(RepairCard.due_date))
+    elif orden_por == "posicion" or not orden_por:
+        q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
+    else:
+        q = q.order_by(RepairCard.position.asc(), RepairCard.start_date.desc())
 
     if board_mode:
         per_page = min(per_page or 120, 200)
@@ -429,10 +449,15 @@ def get_tarjetas(
 
         if fast_mode:
             # Cursor pagination must use a deterministic order aligned with cursor field.
-            # Clear inherited ordering (position/start_date) to avoid skipped/duplicated rows.
-            fast_q = q.options(defer(RepairCard.image_url)).order_by(None).order_by(RepairCard.id.asc())
+            # When a custom sort is requested, skip the id-based cursor optimization to
+            # preserve the requested ordering across pages.
+            use_cursor = not orden_por or orden_por == "posicion"
+            if use_cursor:
+                fast_q = q.options(defer(RepairCard.image_url)).order_by(None).order_by(RepairCard.id.asc())
+            else:
+                fast_q = q.options(defer(RepairCard.image_url))
             cursor_id: int | None = None
-            if cursor:
+            if use_cursor and cursor:
                 try:
                     cursor_id = int(cursor)
                 except ValueError as err:
@@ -443,7 +468,7 @@ def get_tarjetas(
             has_next = len(page_items) > per_page
             items = page_items[:per_page]
             _auto_migrate_legacy_for_cards(db, items, max_cards=20)
-            next_cursor = str(items[-1].id) if has_next and items else None
+            next_cursor = str(items[-1].id) if (use_cursor and has_next and items) else None
             total = q.order_by(None).count() if include_totals else None
             pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
             data = {

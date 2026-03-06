@@ -8,6 +8,8 @@ interface Filtros {
   asignado_a: string;
   cargador: string;
   tag: string;
+  orden_por: string;
+  orden_dir: string;
 }
 
 interface Props {
@@ -19,11 +21,15 @@ interface Props {
   columnas: { key: string; title: string }[];
 }
 
+const EMPTY_FILTROS: Filtros = { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '', orden_por: '', orden_dir: '' };
+
 export default function BusquedaFiltros({ filtros, onChange, totalResults, users, tags, columnas }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const set = (key: keyof Filtros, val: string) => onChange({ ...filtros, [key]: val });
-  const hasFilters = filtros.search || filtros.estado || filtros.prioridad || filtros.asignado_a || filtros.cargador || filtros.tag;
-  const activeFilterCount = [filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag].filter(Boolean).length;
+  const hasFilters = filtros.search || filtros.estado || filtros.prioridad || filtros.asignado_a || filtros.cargador || filtros.tag || filtros.orden_por;
+  const activeFilterCount = [filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag, filtros.orden_por].filter(Boolean).length;
+
+  const toggleOrdenDir = () => set('orden_dir', filtros.orden_dir === 'desc' ? 'asc' : 'desc');
 
   return (
     <div className="filtros-bar">
@@ -84,6 +90,31 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
             <option value="si">Con cargador</option>
             <option value="no">Sin cargador</option>
           </select>
+
+          <div className="orden-group">
+            <select
+              className="filter-select"
+              value={filtros.orden_por}
+              onChange={e => set('orden_por', e.target.value)}
+              aria-label="Ordenar por"
+            >
+              <option value="">Orden por posicion</option>
+              <option value="fecha_ingreso">Fecha ingreso</option>
+              <option value="prioridad">Prioridad</option>
+              <option value="nombre_cliente">Nombre cliente</option>
+              <option value="fecha_limite">Fecha limite</option>
+            </select>
+            {filtros.orden_por && (
+              <button
+                className="orden-dir-btn"
+                onClick={toggleOrdenDir}
+                title={filtros.orden_dir === 'desc' ? 'Descendente' : 'Ascendente'}
+                aria-label="Cambiar direccion de orden"
+              >
+                <i className={`fas fa-sort-amount-${filtros.orden_dir === 'desc' ? 'down' : 'up'}`}></i>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -91,7 +122,7 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
         <div className="filtros-info">
           {totalResults !== undefined && <span className="results-count">{totalResults} resultados</span>}
           {hasFilters && (
-            <button className="clear-all-btn" onClick={() => onChange({ search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '' })}>
+            <button className="clear-all-btn" onClick={() => onChange(EMPTY_FILTROS)}>
               <i className="fas fa-times-circle"></i> Limpiar filtros
             </button>
           )}

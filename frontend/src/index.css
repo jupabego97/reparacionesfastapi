@@ -538,6 +538,30 @@ body {
   min-width: 120px;
 }
 
+.orden-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.orden-dir-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.orden-dir-btn:hover {
+  background: var(--hover-bg);
+}
+
 .filtros-info {
   display: flex;
   align-items: center;
