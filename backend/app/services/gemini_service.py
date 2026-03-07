@@ -12,36 +12,27 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv()
 
-PROMPT_EXTRACT_INFO = """
-Eres un asistente experto en analizar imágenes de dispositivos electrónicos en un taller de reparación.
+PROMPT_EXTRACT_INFO = """Analiza esta imagen de un taller de reparacion y extrae en JSON:
+- nombre: nombre del cliente en etiqueta o nota (default "Cliente")
+- telefono: numero de telefono/whatsapp visible (default "")
+- tiene_cargador: true si ves cable USB o cargador, false si no
 
-Analiza cuidadosamente esta imagen y extrae la siguiente información:
+Responde SOLO con JSON valido: {"nombre": "...", "telefono": "...", "tiene_cargador": true/false}"""
 
-1. **NOMBRE DEL CLIENTE**:
-   - Busca nombres escritos en etiquetas adhesivas
-   - Busca nombres en papeles o notas pegadas al dispositivo
-   - Si no encuentras ningún nombre, usa "Cliente"
-
-2. **NÚMERO DE TELÉFONO/WHATSAPP**:
-   - Busca números de teléfono escritos
-   - Si no encuentras ningún número, devuelve cadena vacía ""
-
-3. **CARGADOR INCLUIDO**:
-   - ¿Ves un cable USB, cable de carga o adaptador en la imagen?
-   - Si NO ves ningún cable/cargador claramente, responde false
-
-IMPORTANTE: Debes responder ÚNICAMENTE con un objeto JSON válido.
-
-Formato: {"nombre": "...", "telefono": "...", "tiene_cargador": true/false}
-"""
+# Singleton — se inicializa una sola vez y se reutiliza en todos los requests
+_gemini_instance: "GeminiService | None" = None
 
 
-def get_gemini_service():
+def get_gemini_service() -> "GeminiService | None":
+    global _gemini_instance
+    if _gemini_instance is not None:
+        return _gemini_instance
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or api_key == "your_gemini_api_key_here":
         return None
     try:
-        return GeminiService()
+        _gemini_instance = GeminiService()
+        return _gemini_instance
     except Exception as e:
         logger.warning(f"Gemini no disponible: {e}")
         return None
@@ -58,7 +49,7 @@ class GeminiService:
         self._genai.configure(api_key=api_key)
         self.model = self._genai.GenerativeModel("gemini-flash-latest")
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.5, min=0.5, max=3), reraise=True)
     def extract_client_info_from_image(self, image_data, image_format="jpeg"):
         try:
             if isinstance(image_data, str) and image_data.startswith("data:image"):
@@ -101,7 +92,7 @@ class GeminiService:
             logger.exception(f"Error procesando imagen: {e}")
             return {"nombre": "Cliente", "telefono": "", "tiene_cargador": False, "_error": str(e)}
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.5, min=0.5, max=3), reraise=True)
     def transcribe_audio(self, audio_data: bytes) -> str:
         path = None
         try:

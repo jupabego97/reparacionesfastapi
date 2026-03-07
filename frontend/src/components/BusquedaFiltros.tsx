@@ -85,11 +85,24 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
             </select>
           )}
 
-          <select className="filter-select" value={filtros.cargador} onChange={e => set('cargador', e.target.value)} aria-label="Filtrar por cargador">
-            <option value="">Cargador</option>
-            <option value="si">Con cargador</option>
-            <option value="no">Sin cargador</option>
-          </select>
+          <div className="cargador-toggle" aria-label="Filtrar por cargador">
+            <button
+              className={`cargador-btn ${filtros.cargador === 'si' ? 'active' : ''}`}
+              onClick={() => set('cargador', filtros.cargador === 'si' ? '' : 'si')}
+              title="Con cargador"
+              type="button"
+            >
+              <i className="fas fa-plug"></i>
+            </button>
+            <button
+              className={`cargador-btn cargador-btn-no ${filtros.cargador === 'no' ? 'active' : ''}`}
+              onClick={() => set('cargador', filtros.cargador === 'no' ? '' : 'no')}
+              title="Sin cargador"
+              type="button"
+            >
+              <i className="fas fa-plug"></i><i className="fas fa-slash cargador-slash"></i>
+            </button>
+          </div>
 
           <div className="orden-group">
             <select
@@ -98,11 +111,11 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
               onChange={e => set('orden_por', e.target.value)}
               aria-label="Ordenar por"
             >
-              <option value="">Orden por posicion</option>
-              <option value="fecha_ingreso">Fecha ingreso</option>
+              <option value="">Posicion</option>
+              <option value="fecha_ingreso">Ingreso</option>
               <option value="prioridad">Prioridad</option>
-              <option value="nombre_cliente">Nombre cliente</option>
-              <option value="fecha_limite">Fecha limite</option>
+              <option value="nombre_cliente">Cliente</option>
+              <option value="fecha_limite">Limite</option>
             </select>
             {filtros.orden_por && (
               <button
