@@ -8,6 +8,23 @@ interface Props {
   onSuccess?: () => void;
 }
 
+function resizeImageDataUrl(dataUrl: string, maxPx = 800): Promise<string> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = () => resolve(dataUrl); // fallback sin resize si falla
+    img.src = dataUrl;
+  });
+}
+
 function defaultTomorrowDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -100,8 +117,11 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     const dataUrl = c.toDataURL('image/jpeg', 0.7);
     setFlash(true);
     setTimeout(() => setFlash(false), 200);
-    setCapturedPreview(dataUrl);
-    setStep('preview');
+    // Redimensionar para la preview también (la preview solo necesita max 800px)
+    resizeImageDataUrl(dataUrl).then(resized => {
+      setCapturedPreview(resized);
+      setStep('preview');
+    });
     if (videoRef.current?.srcObject) {
       (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
       setCameraActive(false);
@@ -143,20 +163,21 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     setLoading(true);
     setError('');
     setStep('processing');
+    const resized = await resizeImageDataUrl(imageData);
     try {
-      const result = await api.procesarImagen(imageData);
+      const result = await api.procesarImagen(resized);
       setForm(prev => ({
         ...prev,
         nombre_propietario: result.nombre || prev.nombre_propietario,
         whatsapp: result.telefono || prev.whatsapp,
         tiene_cargador: result.tiene_cargador ? 'si' : 'no',
-        imagen_url: imageData,
+        imagen_url: resized,
       }));
       if (result._partial) {
         setError('IA no disponible. Completa los datos manualmente.');
       }
     } catch {
-      setForm(prev => ({ ...prev, imagen_url: imageData }));
+      setForm(prev => ({ ...prev, imagen_url: resized }));
       setError('No se pudo analizar la imagen. Completa los datos manualmente.');
     }
     setCapturedPreview(null);

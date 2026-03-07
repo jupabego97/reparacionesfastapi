@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import concurrent.futures
 
@@ -26,7 +27,7 @@ class ProcesarImagenBody(BaseModel):
 
 @router.post("/procesar-imagen")
 @limiter.limit("5 per minute")
-def procesar_imagen(request: Request, data: ProcesarImagenBody):
+async def procesar_imagen(request: Request, data: ProcesarImagenBody):
     gemini = get_gemini_service()
     if not gemini:
         logger.warning("Intento de procesamiento sin Gemini disponible")
@@ -42,7 +43,8 @@ def procesar_imagen(request: Request, data: ProcesarImagenBody):
     if not image_data:
         raise HTTPException(status_code=400, detail="No se proporcionó imagen")
     try:
-        result = gemini.extract_client_info_from_image(image_data)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, gemini.extract_client_info_from_image, image_data)
         if not isinstance(result, dict):
             logger.error(f"Resultado inesperado de Gemini: {type(result)}")
             return JSONResponse(
