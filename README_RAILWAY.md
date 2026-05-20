@@ -23,12 +23,14 @@ Este proyecto está preparado para desplegarse en Railway con **3 servicios sepa
 
 1. **+ New** → **GitHub Repo** → `reparacionesfastapi` (o usa el que añadiste)
 2. En el servicio backend → **Settings**:
-   - **Root Directory**: vacío (usa raíz, Procfile hace `cd backend`) **o** `backend` (usa backend/Procfile)
+   - **Root Directory**: `backend` (recomendado; usa `backend/Procfile` y `backend/railway.json` con Python)
+   - Alternativa: raíz del repo con Procfile raíz (`cd backend`); no uses la config Node del frontend en este servicio
    - **Build Command**: *(dejar vacío – usa Procfile)*
    - **Start Command**: *(dejar vacío – usa Procfile)*
 3. **Variables** (o **Variables** en el dashboard):
    - `DATABASE_URL` → Referencia al servicio PostgreSQL (clic en el add-on y **Connect** → copia la variable)
    - `ENVIRONMENT` = `production`
+   - `JWT_SECRET` = **secreto largo y aleatorio** (obligatorio). Si falta o queda el valor por defecto, la app **no arranca** en producción.
    - `ALLOWED_ORIGINS` = **URL exacta del frontend** (ej: `https://just-wisdom-production-d465.up.railway.app`). Sin esta variable, CORS bloqueará Socket.IO y la API desde otro dominio.
    - `GEMINI_API_KEY` = *(opcional)*
    - `SOCKETIO_SAFE_MODE` = `1`
@@ -73,6 +75,7 @@ cd backend && python -m alembic upgrade head
 |------------|------------------|------------------------------------------------------------|
 | Backend    | DATABASE_URL     | `postgresql://...` (de add-on PostgreSQL)                  |
 | Backend    | ENVIRONMENT      | `production`                                               |
+| Backend    | JWT_SECRET       | Secreto fuerte (obligatorio en producción)                 |
 | Backend    | ALLOWED_ORIGINS  | URL exacta del frontend (ej: `https://just-wisdom-production-d465.up.railway.app`). **Obligatorio** para CORS cross-origin |
 | Backend    | GEMINI_API_KEY   | *(opcional)*                                               |
 | Backend    | SOCKETIO_SAFE_MODE | `1`                                                      |
