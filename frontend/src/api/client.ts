@@ -656,27 +656,79 @@ export const api = {
   },
 
   // --- Multimedia ---
-  async procesarImagen(imageData: string): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean; _partial?: boolean }> {
-    const res = await fetchWithAuth(`${API_BASE}/api/procesar-imagen`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ image: imageData }),
-    });
-    const raw = await res.text();
-    let data: { nombre?: string; telefono?: string; tiene_cargador?: boolean };
+  /** Timeout cliente para IA (backend usa ~25s). */
+  async procesarImagen(
+    imageData: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean; _partial?: boolean; error?: string }> {
+    const timeoutMs = options?.timeoutMs ?? 30_000;
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    if (options?.signal) {
+      if (options.signal.aborted) controller.abort();
+      else options.signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      data = raw ? (JSON.parse(raw) as { nombre?: string; telefono?: string; tiene_cargador?: boolean }) : {};
-    } catch {
-      data = {};
-    }
-    if (!res.ok) {
-      if (data && typeof data.nombre === 'string') {
-        return { nombre: data.nombre, telefono: data.telefono ?? '', tiene_cargador: !!data.tiene_cargador, _partial: true };
+      const res = await fetchWithAuth(`${API_BASE}/api/procesar-imagen`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ image: imageData }),
+        signal: controller.signal,
+      });
+      const raw = await res.text();
+      let data: { nombre?: string; telefono?: string; tiene_cargador?: boolean; error?: string; _partial?: boolean };
+      try {
+        data = raw ? (JSON.parse(raw) as typeof data) : {};
+      } catch {
+        data = {};
       }
-      throw await parseApiError(res, raw);
+      if (!res.ok) {
+        if (data && typeof data.nombre === 'string') {
+          return {
+            nombre: data.nombre,
+            telefono: data.telefono ?? '',
+            tiene_cargador: !!data.tiene_cargador,
+            _partial: true,
+            error: data.error,
+          };
+        }
+        throw await parseApiError(res, raw);
+      }
+      return {
+        nombre: data.nombre ?? 'Cliente',
+        telefono: data.telefono ?? '',
+        tiene_cargador: !!data.tiene_cargador,
+        ...(data._partial ? { _partial: true, error: data.error } : {}),
+      };
+    } catch (err) {
+      const isAbort =
+        (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && err.name === 'AbortError');
+      if (isAbort) {
+        // Abort por el caller (cerrar/omitir): propagar. Abort por timeout local: degradar.
+        if (options?.signal?.aborted) throw err;
+        return {
+          nombre: 'Cliente',
+          telefono: '',
+          tiene_cargador: false,
+          _partial: true,
+          error: 'La IA tardó demasiado. Completa los datos manualmente.',
+        };
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      options?.signal?.removeEventListener('abort', onAbort);
     }
-    return { nombre: data.nombre ?? 'Cliente', telefono: data.telefono ?? '', tiene_cargador: !!data.tiene_cargador };
   },
-  async transcribirAudio(formData: FormData): Promise<{ transcripcion: string }> {
-    const res = await fetchWithAuth(`${API_BASE}/api/transcribir-audio`, { method: 'POST', body: formData, headers: authHeaders() });
+  async transcribirAudio(formData: FormData, options?: { signal?: AbortSignal }): Promise<{ transcripcion: string }> {
+    const res = await fetchWithAuth(`${API_BASE}/api/transcribir-audio`, {
+      method: 'POST',
+      body: formData,
+      headers: authHeaders(),
+      signal: options?.signal,
+    });
     await ensureOk(res);
     return res.json();
   },

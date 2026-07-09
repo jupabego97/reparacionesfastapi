@@ -1,79 +1,100 @@
-import asyncio
-import base64
-import concurrent.futures
+"""Endpoints de multimedia / IA (Gemini)."""
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+import asyncio
+import concurrent.futures
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.limiter import limiter
-from app.services.gemini_service import get_gemini_service
+from app.models.user import User
+from app.services.auth_service import get_current_user
+from app.services.gemini_service import FALLBACK_IA, get_gemini_service
 
 router = APIRouter(prefix="/api", tags=["multimedia"])
 
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-FALLBACK_IA = {
-    "nombre": "Cliente",
-    "telefono": "",
-    "tiene_cargador": False,
-}
+# Timeout de la llamada a Gemini (imagen/audio). El cliente usa un margen similar.
+GEMINI_TIMEOUT_SECONDS = 25
 
 
 class ProcesarImagenBody(BaseModel):
-    image: str
+    image: str = Field(..., min_length=1)
+
+
+def _ia_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "Servicio de IA no disponible",
+            **FALLBACK_IA,
+            "_partial": True,
+        },
+    )
 
 
 @router.post("/procesar-imagen")
-@limiter.limit("5 per minute")
-async def procesar_imagen(request: Request, data: ProcesarImagenBody):
+@limiter.limit("15 per minute")
+async def procesar_imagen(
+    request: Request,
+    data: ProcesarImagenBody,
+    _user: User = Depends(get_current_user),
+):
     gemini = get_gemini_service()
     if not gemini:
         logger.warning("Intento de procesamiento sin Gemini disponible")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "Servicio de IA no disponible",
-                **FALLBACK_IA,
-                "_debug": "Gemini no está configurado o no está disponible",
-            },
-        )
-    image_data = data.image
-    if not image_data:
-        raise HTTPException(status_code=400, detail="No se proporcionó imagen")
+        return _ia_unavailable_response()
+
     try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(executor, gemini.extract_client_info_from_image, image_data)
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(executor, gemini.extract_client_info_from_image, data.image),
+            timeout=GEMINI_TIMEOUT_SECONDS,
+        )
         if not isinstance(result, dict):
             logger.error(f"Resultado inesperado de Gemini: {type(result)}")
             return JSONResponse(
                 status_code=500,
-                content={
-                    "error": "Respuesta inválida del servicio de IA",
-                    **FALLBACK_IA,
-                },
+                content={"error": "Respuesta inválida del servicio de IA", **FALLBACK_IA, "_partial": True},
             )
-        result.setdefault("nombre", "Cliente")
-        result.setdefault("telefono", "")
-        result.setdefault("tiene_cargador", False)
-        return result
+        return {
+            "nombre": str(result.get("nombre") or "Cliente"),
+            "telefono": str(result.get("telefono") or ""),
+            "tiene_cargador": bool(result.get("tiene_cargador", False)),
+        }
+    except asyncio.TimeoutError:
+        logger.warning("Timeout procesando imagen con Gemini")
+        return JSONResponse(
+            status_code=408,
+            content={
+                "error": "La IA tardó demasiado. Completa los datos manualmente.",
+                **FALLBACK_IA,
+                "_partial": True,
+            },
+        )
     except Exception as e:
         logger.exception(f"Error procesando imagen: {e}")
         return JSONResponse(
             status_code=500,
             content={
                 "error": "Error procesando la imagen",
-                "details": str(e),
                 **FALLBACK_IA,
-                "_debug": f"Error en servidor: {str(e)}",
+                "_partial": True,
             },
         )
 
 
 @router.post("/transcribir-audio")
-@limiter.limit("5 per minute")
-async def transcribir_audio(request: Request, audio: UploadFile = File(...)):
+@limiter.limit("15 per minute")
+async def transcribir_audio(
+    request: Request,
+    audio: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+):
     gemini = get_gemini_service()
     if not gemini:
         raise HTTPException(status_code=503, detail="Servicio de IA no disponible")
@@ -82,52 +103,65 @@ async def transcribir_audio(request: Request, audio: UploadFile = File(...)):
     data = await audio.read()
     if not data:
         raise HTTPException(status_code=400, detail="Archivo de audio vacío")
+    mime = audio.content_type or "audio/wav"
     try:
-        transcripcion = executor.submit(gemini.transcribe_audio, data).result(timeout=30)
+        loop = asyncio.get_running_loop()
+        transcripcion = await asyncio.wait_for(
+            loop.run_in_executor(executor, lambda: gemini.transcribe_audio(data, mime_type=mime)),
+            timeout=GEMINI_TIMEOUT_SECONDS,
+        )
         return {"transcripcion": transcripcion}
-    except concurrent.futures.TimeoutError as err:
+    except asyncio.TimeoutError as err:
         raise HTTPException(status_code=408, detail="Timeout procesando audio") from err
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Error al transcribir audio") from e
 
 
 class ProcesarMultimediaBody(BaseModel):
-    image: str
-    audio: str | None = None
+    image: str = Field(..., min_length=1)
+    audio: Optional[str] = None
 
 
 @router.post("/procesar-multimedia")
-@limiter.limit("5 per minute")
-def procesar_multimedia(request: Request, data: ProcesarMultimediaBody):
+@limiter.limit("15 per minute")
+async def procesar_multimedia(
+    request: Request,
+    data: ProcesarMultimediaBody,
+    _user: User = Depends(get_current_user),
+):
     gemini = get_gemini_service()
     if not gemini:
         raise HTTPException(status_code=503, detail="Servicio de IA no disponible")
-    if not data.image:
-        raise HTTPException(status_code=400, detail="No se proporcionó imagen")
-    if not data.audio:
-        resultado_imagen = gemini.extract_client_info_from_image(data.image)
-        return {"imagen": resultado_imagen, "audio": {"error": "No se proporcionó audio"}}
 
-    def task_imagen():
-        return gemini.extract_client_info_from_image(data.image)
+    loop = asyncio.get_running_loop()
+
+    async def run_image():
+        return await asyncio.wait_for(
+            loop.run_in_executor(executor, gemini.extract_client_info_from_image, data.image),
+            timeout=GEMINI_TIMEOUT_SECONDS,
+        )
+
+    if not data.audio:
+        try:
+            resultado_imagen = await run_image()
+            return {"imagen": resultado_imagen, "audio": {"error": "No se proporcionó audio"}}
+        except asyncio.TimeoutError as err:
+            raise HTTPException(status_code=408, detail="Timeout") from err
 
     def task_audio():
-        ad = data.audio
-        if isinstance(ad, str) and ad.startswith("data:audio"):
-            _, enc = ad.split(",", 1)
-            audio_bytes = base64.b64decode(enc)
-        elif isinstance(ad, str):
-            audio_bytes = base64.b64decode(ad)
-        else:
-            audio_bytes = ad
-        return gemini.transcribe_audio(audio_bytes)
+        return gemini.transcribe_audio(data.audio)
 
     try:
-        f_img = executor.submit(task_imagen)
-        f_aud = executor.submit(task_audio)
-        return {"imagen": f_img.result(timeout=30), "audio": f_aud.result(timeout=30)}
-    except concurrent.futures.TimeoutError as err:
-        raise HTTPException(
-            status_code=408,
-            detail="Timeout",
-        ) from err
+        resultado_imagen, resultado_audio = await asyncio.wait_for(
+            asyncio.gather(
+                run_image(),
+                asyncio.wait_for(
+                    loop.run_in_executor(executor, task_audio),
+                    timeout=GEMINI_TIMEOUT_SECONDS,
+                ),
+            ),
+            timeout=GEMINI_TIMEOUT_SECONDS + 5,
+        )
+        return {"imagen": resultado_imagen, "audio": resultado_audio}
+    except asyncio.TimeoutError as err:
+        raise HTTPException(status_code=408, detail="Timeout") from err

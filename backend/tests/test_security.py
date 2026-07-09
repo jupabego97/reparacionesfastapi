@@ -91,3 +91,30 @@ def test_media_upload_requires_auth(sample_tarjeta):
 def test_restore_requires_auth(sample_tarjeta):
     r = client.put(f"/api/tarjetas/{sample_tarjeta.id}/restore")
     assert r.status_code == 401
+
+
+def test_procesar_imagen_requires_auth():
+    r = client.post("/api/procesar-imagen", json={"image": "data:image/jpeg;base64,abc"})
+    assert r.status_code == 401
+
+
+def test_transcribir_audio_requires_auth():
+    r = client.post(
+        "/api/transcribir-audio",
+        files={"audio": ("clip.wav", b"RIFF", "audio/wav")},
+    )
+    assert r.status_code == 401
+
+
+def test_procesar_imagen_with_auth_when_gemini_unavailable(auth_headers):
+    r = client.post(
+        "/api/procesar-imagen",
+        json={"image": "data:image/jpeg;base64,abc"},
+        headers=auth_headers,
+    )
+    # Sin GEMINI_API_KEY: 503 con fallback parcial; con key inválida/otra falla: 4xx/5xx
+    assert r.status_code in (408, 500, 503)
+    if r.status_code == 503:
+        body = r.json()
+        assert body.get("nombre") == "Cliente"
+        assert body.get("_partial") is True

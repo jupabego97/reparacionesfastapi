@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, UserInfo, TarjetaCreate } from '../api/client';
@@ -8,7 +8,14 @@ interface Props {
   onSuccess?: () => void;
 }
 
-function resizeImageDataUrl(dataUrl: string, maxPx = 800): Promise<string> {
+const JPEG_QUALITY = 0.75;
+const MAX_IMAGE_PX = 800;
+const AI_TIMEOUT_MS = 30_000;
+
+type CaptureStep = 'capture' | 'preview' | 'processing' | 'form';
+type AiPhase = 'idle' | 'optimizing' | 'analyzing' | 'done' | 'failed';
+
+function resizeImageDataUrl(dataUrl: string, maxPx = MAX_IMAGE_PX, quality = JPEG_QUALITY): Promise<string> {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
@@ -16,11 +23,12 @@ function resizeImageDataUrl(dataUrl: string, maxPx = 800): Promise<string> {
       const w = Math.round(img.width * scale);
       const h = Math.round(img.height * scale);
       const c = document.createElement('canvas');
-      c.width = w; c.height = h;
+      c.width = w;
+      c.height = h;
       c.getContext('2d')!.drawImage(img, 0, 0, w, h);
-      resolve(c.toDataURL('image/jpeg', 0.75));
+      resolve(c.toDataURL('image/jpeg', quality));
     };
-    img.onerror = () => resolve(dataUrl); // fallback sin resize si falla
+    img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
 }
@@ -42,14 +50,25 @@ function useIsMobile(): boolean {
   return isMobile;
 }
 
+function stopStream(video: HTMLVideoElement | null) {
+  if (video?.srcObject) {
+    (video.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+}
+
 export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
-  const [step, setStep] = useState<'capture' | 'preview' | 'processing' | 'form'>('capture');
+  const [step, setStep] = useState<CaptureStep>('capture');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [flash, setFlash] = useState(false);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
+  const [aiPhase, setAiPhase] = useState<AiPhase>('idle');
+  const [aiElapsedSec, setAiElapsedSec] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const closedRef = useRef(false);
   const isMobile = useIsMobile();
   const [cameraActive, setCameraActive] = useState(() => window.innerWidth <= 768);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
@@ -80,32 +99,62 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     onError: (e: unknown) => setError(e instanceof Error ? e.message : 'Error al crear'),
   });
 
+  const handleClose = useCallback(() => {
+    closedRef.current = true;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    stopStream(videoRef.current);
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
-    const currentVideo = videoRef.current;
+    closedRef.current = false;
     return () => {
-      if (currentVideo?.srcObject) {
-        (currentVideo.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-      }
+      closedRef.current = true;
+      abortRef.current?.abort();
+      stopStream(videoRef.current);
     };
   }, []);
 
-  const startCamera = async () => {
+  useEffect(() => {
+    if (step !== 'processing') {
+      setAiElapsedSec(0);
+      return;
+    }
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      setAiElapsedSec(Math.floor((Date.now() - started) / 1000));
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [step]);
+
+  const startCamera = useCallback(async () => {
     try {
+      setError('');
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      if (videoRef.current) { videoRef.current.srcObject = stream; setCameraActive(true); }
+      if (closedRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        setCameraActive(true);
+      } else {
+        stream.getTracks().forEach(t => t.stop());
+      }
     } catch {
       setError('No se pudo acceder a la cámara');
-      setCameraActive(false); // Mostrar opciones subir/sin imagen si falla
+      setCameraActive(false);
     }
-  };
+  }, []);
 
-  // En móvil: ir directo a la cámara al abrir, sin menú de opciones
+  // En móvil: ir directo a la cámara al abrir
   useEffect(() => {
     if (isMobile && step === 'capture') {
       setCameraActive(true);
-      startCamera();
+      void startCamera();
     }
-  }, [isMobile, step]);
+  }, [isMobile, step, startCamera]);
 
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -114,29 +163,102 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     c.width = v.videoWidth;
     c.height = v.videoHeight;
     c.getContext('2d')?.drawImage(v, 0, 0);
-    const dataUrl = c.toDataURL('image/jpeg', 0.7);
+    // Un solo encode JPEG (calidad final); el resize posterior solo escala si hace falta
+    const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY);
     setFlash(true);
     setTimeout(() => setFlash(false), 200);
-    // Redimensionar para la preview también (la preview solo necesita max 800px)
     resizeImageDataUrl(dataUrl).then(resized => {
+      if (closedRef.current) return;
       setCapturedPreview(resized);
       setStep('preview');
     });
-    if (videoRef.current?.srcObject) {
-      (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-      setCameraActive(false);
+    stopStream(videoRef.current);
+    setCameraActive(false);
+  };
+
+  const processImage = async (imageData: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError('');
+    setAiPhase('optimizing');
+    setStep('processing');
+
+    let resized = imageData;
+    try {
+      resized = await resizeImageDataUrl(imageData);
+      if (controller.signal.aborted || closedRef.current) return;
+
+      setAiPhase('analyzing');
+      const result = await api.procesarImagen(resized, {
+        signal: controller.signal,
+        timeoutMs: AI_TIMEOUT_MS,
+      });
+      if (controller.signal.aborted || closedRef.current) return;
+
+      setForm(prev => ({
+        ...prev,
+        nombre_propietario: result.nombre || prev.nombre_propietario,
+        whatsapp: result.telefono || prev.whatsapp,
+        tiene_cargador: result.tiene_cargador ? 'si' : 'no',
+        imagen_url: resized,
+      }));
+
+      if (result._partial) {
+        setAiPhase('failed');
+        setError(result.error || 'IA no disponible. Completa los datos manualmente.');
+      } else {
+        setAiPhase('done');
+      }
+    } catch (err) {
+      if (controller.signal.aborted || closedRef.current) return;
+      setForm(prev => ({ ...prev, imagen_url: resized }));
+      setAiPhase('failed');
+      setError(err instanceof Error ? err.message : 'No se pudo analizar la imagen. Completa los datos manualmente.');
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      // Si el usuario omitió/cerró, no pisar el estado que ya fijó skip/close.
+      if (!closedRef.current && !controller.signal.aborted) {
+        setCapturedPreview(null);
+        setStep('form');
+        setLoading(false);
+        stopStream(videoRef.current);
+        setCameraActive(false);
+      } else if (!closedRef.current && controller.signal.aborted) {
+        // Abort por omitir: skipAiAndContinue ya dejó el form; solo limpiar loading/cámara.
+        setLoading(false);
+        stopStream(videoRef.current);
+        setCameraActive(false);
+      }
     }
   };
 
   const confirmPhoto = () => {
-    if (capturedPreview) processImage(capturedPreview);
+    if (capturedPreview) void processImage(capturedPreview);
+  };
+
+  const skipAiAndContinue = () => {
+    const img = capturedPreview || form.imagen_url;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (img) setForm(prev => ({ ...prev, imagen_url: img }));
+    setCapturedPreview(null);
+    setAiPhase('failed');
+    setError('Análisis omitido. Completa los datos manualmente.');
+    setStep('form');
+    setLoading(false);
   };
 
   const retakePhoto = () => {
+    abortRef.current?.abort();
     setCapturedPreview(null);
+    setAiPhase('idle');
+    setError('');
     setCameraActive(true);
     setStep('capture');
-    startCamera();
+    void startCamera();
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -153,43 +275,13 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
       r.readAsDataURL(file);
     }));
     Promise.all(readers).then(previews => {
+      if (closedRef.current) return;
       setPhotoPreviews(previews.filter(Boolean));
-      if (previews[0]) processImage(previews[0]);
+      if (previews[0]) void processImage(previews[0]);
       else setStep('form');
     });
   };
 
-  const processImage = async (imageData: string) => {
-    setLoading(true);
-    setError('');
-    setStep('processing');
-    const resized = await resizeImageDataUrl(imageData);
-    try {
-      const result = await api.procesarImagen(resized);
-      setForm(prev => ({
-        ...prev,
-        nombre_propietario: result.nombre || prev.nombre_propietario,
-        whatsapp: result.telefono || prev.whatsapp,
-        tiene_cargador: result.tiene_cargador ? 'si' : 'no',
-        imagen_url: resized,
-      }));
-      if (result._partial) {
-        setError('IA no disponible. Completa los datos manualmente.');
-      }
-    } catch {
-      setForm(prev => ({ ...prev, imagen_url: resized }));
-      setError('No se pudo analizar la imagen. Completa los datos manualmente.');
-    }
-    setCapturedPreview(null);
-    setStep('form');
-    setLoading(false);
-    if (videoRef.current?.srcObject) {
-      (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-      setCameraActive(false);
-    }
-  };
-
-  // Mejora #27: Validación con mensajes claros
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!form.nombre_propietario.trim()) errs.nombre = 'El nombre es requerido';
@@ -210,18 +302,18 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     if (!validate()) return;
     try {
       const created = await createMut.mutateAsync({
-      nombre_propietario: form.nombre_propietario.trim(),
-      problema: form.problema.trim() || 'Sin descripción',
-      whatsapp: form.whatsapp.trim(),
-      fecha_limite: form.fecha_limite,
-      tiene_cargador: form.tiene_cargador,
-      imagen_url: photoFiles.length > 0 ? undefined : (form.imagen_url || undefined),
-      prioridad: form.prioridad,
-      asignado_a: form.asignado_a ? Number(form.asignado_a) : undefined,
-      costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : undefined,
-      notas_tecnicas: form.notas_tecnicas || undefined,
-      tags: selectedTags.length ? selectedTags : undefined,
-    });
+        nombre_propietario: form.nombre_propietario.trim(),
+        problema: form.problema.trim() || 'Sin descripción',
+        whatsapp: form.whatsapp.trim(),
+        fecha_limite: form.fecha_limite,
+        tiene_cargador: form.tiene_cargador,
+        imagen_url: photoFiles.length > 0 ? undefined : (form.imagen_url || undefined),
+        prioridad: form.prioridad,
+        asignado_a: form.asignado_a ? Number(form.asignado_a) : undefined,
+        costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : undefined,
+        notas_tecnicas: form.notas_tecnicas || undefined,
+        tags: selectedTags.length ? selectedTags : undefined,
+      });
       if (photoFiles.length > 0) {
         setUploadState('uploading');
         try {
@@ -233,22 +325,33 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
         }
       }
       onSuccess?.();
-      onClose();
+      handleClose();
     } catch {
       setUploadState('idle');
     }
   };
 
+  const aiStatusLabel =
+    aiPhase === 'optimizing'
+      ? 'Optimizando imagen…'
+      : aiPhase === 'analyzing'
+        ? 'Extrayendo nombre, teléfono y cargador…'
+        : 'Analizando imagen con IA…';
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleClose}>
       <div className="modal-pro" onClick={e => e.stopPropagation()}>
         <div className="modal-pro-header">
           <h3><i className="fas fa-plus-circle"></i> Nueva Reparación</h3>
-          <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+          <button className="modal-close" onClick={handleClose} type="button" aria-label="Cerrar">
+            <i className="fas fa-times"></i>
+          </button>
         </div>
 
         <div className="modal-pro-body">
-          {error && <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {error}</div>}
+          {error && step !== 'processing' && (
+            <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {error}</div>
+          )}
 
           {step === 'capture' && (
             <div className={`capture-step ${isMobile && cameraActive ? 'camera-fullscreen' : ''}`}>
@@ -260,7 +363,12 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
               {cameraActive ? (
                 <div className={`camera-container ${isMobile ? 'camera-fullscreen-inner' : ''}`}>
                   {isMobile && (
-                    <button type="button" className="camera-back-btn" onClick={() => { (videoRef.current?.srcObject as MediaStream)?.getTracks().forEach(t => t.stop()); onClose(); }} aria-label="Cerrar cámara">
+                    <button
+                      type="button"
+                      className="camera-back-btn"
+                      onClick={() => { stopStream(videoRef.current); handleClose(); }}
+                      aria-label="Cerrar cámara"
+                    >
                       <i className="fas fa-times"></i>
                     </button>
                   )}
@@ -274,7 +382,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
                 </div>
               ) : (
                 <div className="capture-options capture-options-horizontal">
-                  <button className="capture-btn capture-btn-large" onClick={startCamera} type="button">
+                  <button className="capture-btn capture-btn-large" onClick={() => void startCamera()} type="button">
                     <i className="fas fa-camera"></i>
                     <span>Usar cámara</span>
                   </button>
@@ -289,15 +397,26 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
                   </button>
                 </div>
               )}
-              {loading && <div className="ai-loading"><i className="fas fa-brain fa-pulse"></i> Procesando con IA...</div>}
             </div>
           )}
 
           {step === 'processing' && (
-            <div className="ai-processing-screen">
+            <div className="ai-processing-screen" role="status" aria-live="polite">
               <i className="fas fa-brain fa-pulse"></i>
-              <p>Analizando imagen con IA...</p>
+              <p>{aiStatusLabel}</p>
               <div className="ai-processing-bar" />
+              <div className="ai-processing-meta">
+                <span className={`ai-phase-chip ${aiPhase === 'optimizing' ? 'active' : aiPhase === 'analyzing' || aiPhase === 'done' ? 'done' : ''}`}>
+                  1. Optimizar
+                </span>
+                <span className={`ai-phase-chip ${aiPhase === 'analyzing' ? 'active' : aiPhase === 'done' ? 'done' : ''}`}>
+                  2. Analizar
+                </span>
+              </div>
+              <small className="ai-processing-timer">{aiElapsedSec}s · máx. {Math.round(AI_TIMEOUT_MS / 1000)}s</small>
+              <button type="button" className="btn-cancel ai-skip-btn" onClick={skipAiAndContinue}>
+                Omitir IA y continuar
+              </button>
             </div>
           )}
 
@@ -412,7 +531,9 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
               {form.imagen_url && (
                 <div className="preview-image">
                   <img src={form.imagen_url} alt="Preview" />
-                  <button className="btn-del-sm" onClick={() => setForm({ ...form, imagen_url: '' })}><i className="fas fa-times"></i></button>
+                  <button className="btn-del-sm" onClick={() => setForm({ ...form, imagen_url: '' })} type="button">
+                    <i className="fas fa-times"></i>
+                  </button>
                 </div>
               )}
               {photoPreviews.length > 0 && (
@@ -432,10 +553,10 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
 
         {step === 'form' && (
           <div className="modal-pro-footer">
-            <button className="btn-cancel" onClick={() => setStep('capture')}>
+            <button className="btn-cancel" onClick={() => setStep('capture')} type="button">
               <i className="fas fa-arrow-left"></i> Volver
             </button>
-            <button className="btn-save" onClick={handleSubmit} disabled={createMut.isPending}>
+            <button className="btn-save" onClick={() => void handleSubmit()} disabled={createMut.isPending} type="button">
               {createMut.isPending ? <><i className="fas fa-spinner fa-spin"></i> Creando...</> : <><i className="fas fa-check"></i> Crear</>}
             </button>
           </div>

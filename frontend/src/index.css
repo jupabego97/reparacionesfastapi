@@ -2186,6 +2186,43 @@ body {
   animation: aiBarSlide 1.2s ease-in-out infinite;
 }
 
+.ai-processing-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.ai-phase-chip {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.35));
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.ai-phase-chip.active {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ai-phase-chip.done {
+  opacity: 1;
+  color: var(--text-primary, inherit);
+}
+
+.ai-processing-timer {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-skip-btn {
+  margin-top: 0.5rem;
+}
+
 @keyframes aiBarSlide {
   0% { left: -40%; }
   100% { left: 100%; }
