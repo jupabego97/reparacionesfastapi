@@ -47,7 +47,7 @@ class GeminiService:
 
         self._genai = genai
         self._genai.configure(api_key=api_key)
-        self.model = self._genai.GenerativeModel("gemini-flash-latest")
+        self.model = self._genai.GenerativeModel("gemini-3-flash-latest")
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.5, min=0.5, max=3), reraise=True)
     def extract_client_info_from_image(self, image_data, image_format="jpeg"):
