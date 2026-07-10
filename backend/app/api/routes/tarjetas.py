@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, asc, case, delete, desc, exists, func, insert, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, defer, load_only
+from sqlalchemy.orm import Session, defer
 
 from app.core.cache import invalidate_stats
 from app.core.config import get_settings
@@ -259,37 +259,73 @@ def _enrich_batch(items: list[RepairCard], db: Session, include_image: bool = Tr
 
 
 def _serialize_board_items(items: list[RepairCard], db: Session, include_image: bool) -> list[dict]:
-    """Serializa tarjetas para vista tablero optimizada."""
-    data = _enrich_batch(items, db, include_image=include_image)
+    """Serializa tarjetas para vista tablero optimizada (sin tocar image_url legacy)."""
+    del include_image  # board nunca incluye image_url; thumbs vienen de repair_card_media
+    if not items:
+        return []
+
+    card_ids = [t.id for t in items]
+    cover_map, media_count_map = _media_cover_map(db, card_ids)
+
+    tag_links = db.execute(
+        select(repair_card_tags.c.repair_card_id, repair_card_tags.c.tag_id)
+        .where(repair_card_tags.c.repair_card_id.in_(card_ids))
+    ).all()
+    tag_ids_needed = list({link.tag_id for link in tag_links})
+    tags_by_id: dict[int, dict] = {}
+    if tag_ids_needed:
+        for tg in db.query(Tag).filter(Tag.id.in_(tag_ids_needed)).all():
+            tags_by_id[tg.id] = tg.to_dict()
+    card_tags: dict[int, list[dict]] = {cid: [] for cid in card_ids}
+    for link in tag_links:
+        if link.tag_id in tags_by_id:
+            card_tags[link.repair_card_id].append(tags_by_id[link.tag_id])
+
+    subtask_total: dict[int, int] = {}
+    subtask_done: dict[int, int] = {}
+    for row in db.query(
+        SubTask.tarjeta_id,
+        func.count(SubTask.id),
+        func.sum(case((SubTask.completed == True, 1), else_=0)),  # noqa: E712
+    ).filter(SubTask.tarjeta_id.in_(card_ids)).group_by(SubTask.tarjeta_id).all():
+        subtask_total[row[0]] = int(row[1] or 0)
+        subtask_done[row[0]] = int(row[2] or 0)
+
+    comment_counts: dict[int, int] = {}
+    for row in db.query(Comment.tarjeta_id, func.count(Comment.id)).filter(
+        Comment.tarjeta_id.in_(card_ids)
+    ).group_by(Comment.tarjeta_id).all():
+        comment_counts[row[0]] = row[1]
+
     compact: list[dict] = []
-    for item in data:
-        problema = (item.get("problema") or "").strip()
-        notas = (item.get("notas_tecnicas") or "").strip()
-        cover_thumb = item.get("cover_thumb_url")
+    for t in items:
+        problema = (t.problem or "").strip()
+        notas = (t.technical_notes or "").strip()
+        cover_thumb = cover_map.get(t.id)
         if isinstance(cover_thumb, str) and cover_thumb.startswith("data:"):
             cover_thumb = None
         compact.append({
-            "id": item.get("id"),
-            "nombre_propietario": item.get("nombre_propietario"),
+            "id": t.id,
+            "nombre_propietario": t.owner_name,
             "problema_resumen": (problema[:90] + "...") if len(problema) > 90 else problema,
-            "columna": item.get("columna"),
-            "prioridad": item.get("prioridad"),
-            "posicion": item.get("posicion"),
-            "asignado_nombre": item.get("asignado_nombre"),
-            "asignado_a": item.get("asignado_a"),
-            "whatsapp": item.get("whatsapp"),
-            "fecha_limite": item.get("fecha_limite"),
-            "tiene_cargador": item.get("tiene_cargador"),
+            "columna": t.status,
+            "prioridad": t.priority,
+            "posicion": t.position,
+            "asignado_nombre": t.assigned_name,
+            "asignado_a": t.assigned_to,
+            "whatsapp": t.whatsapp_number,
+            "fecha_limite": t.due_date.strftime("%Y-%m-%d") if t.due_date else None,
+            "tiene_cargador": t.has_charger,
             "notas_tecnicas_resumen": (notas[:120] + "...") if len(notas) > 120 else notas,
-            "dias_en_columna": item.get("dias_en_columna", 0),
-            "subtasks_total": item.get("subtasks_total", 0),
-            "subtasks_done": item.get("subtasks_done", 0),
-            "comments_count": item.get("comments_count", 0),
-            "bloqueada": item.get("bloqueada"),
-            "motivo_bloqueo": item.get("motivo_bloqueo"),
-            "tags": item.get("tags", []),
+            "dias_en_columna": _calcular_dias_en_columna(t),
+            "subtasks_total": subtask_total.get(t.id, 0),
+            "subtasks_done": subtask_done.get(t.id, 0),
+            "comments_count": comment_counts.get(t.id, 0),
+            "bloqueada": t.blocked_at is not None,
+            "motivo_bloqueo": t.blocked_reason,
+            "tags": card_tags.get(t.id, []),
             "cover_thumb_url": cover_thumb,
-            "media_count": item.get("media_count", 0),
+            "media_count": media_count_map.get(t.id, 0),
             "imagen_url": cover_thumb,
         })
     return compact
@@ -457,37 +493,22 @@ def _fetch_board_remainder_ids(
 
 
 def _load_board_cards(db: Session, card_ids: list[int]) -> list[RepairCard]:
+    """Carga tarjetas del board en 1 query. Solo defer de image_url (base64 pesado).
+
+    No usar load_only aquí: to_dict() lee start_date/costos/deleted_at y con
+    columnas omitidas SQLAlchemy hace lazy-load N+1 (minutos en Postgres remoto).
+    """
     if not card_ids:
         return []
-    return (
+    # Preservar orden del bootstrap (ids pueden venir desordenados por columna)
+    rows = (
         db.query(RepairCard)
         .filter(RepairCard.id.in_(card_ids))
-        .options(
-            defer(RepairCard.image_url),
-            load_only(
-                RepairCard.id,
-                RepairCard.owner_name,
-                RepairCard.problem,
-                RepairCard.whatsapp_number,
-                RepairCard.status,
-                RepairCard.due_date,
-                RepairCard.has_charger,
-                RepairCard.technical_notes,
-                RepairCard.priority,
-                RepairCard.position,
-                RepairCard.assigned_to,
-                RepairCard.assigned_name,
-                RepairCard.blocked_at,
-                RepairCard.blocked_reason,
-                RepairCard.blocked_by,
-                RepairCard.ingresado_date,
-                RepairCard.diagnosticada_date,
-                RepairCard.para_entregar_date,
-                RepairCard.entregados_date,
-            ),
-        )
+        .options(defer(RepairCard.image_url))
         .all()
     )
+    by_id = {t.id: t for t in rows}
+    return [by_id[i] for i in card_ids if i in by_id]
 
 
 # ──────────────────────────────────────────────────────────────
