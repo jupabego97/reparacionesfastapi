@@ -16,13 +16,23 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { api } from '../api/client';
-import type { TarjetaBoardItem, KanbanColumn } from '../api/client';
+import type { TarjetaBoardItem, KanbanColumn, KanbanRules } from '../api/client';
 import SortableTarjetaCard from './SortableTarjetaCard';
 import TarjetaCard from './TarjetaCard';
+import {
+  buildPositionUpdates,
+  canMoveToColumn,
+  cardMatchesBoardFilters,
+  type BoardFilters,
+} from '../utils/boardMoves';
 
 interface Props {
   columnas: KanbanColumn[];
   tarjetas: TarjetaBoardItem[];
+  boardFilters?: BoardFilters;
+  columnTotals?: Record<string, number>;
+  kanbanRules?: KanbanRules;
+  isFetchingMore?: boolean;
   onEdit: (t: TarjetaBoardItem) => void;
   groupBy?: string;
   compactView?: boolean;
@@ -33,6 +43,7 @@ interface Props {
   onUnblock?: (id: number) => void;
   onMoveSuccess?: (cardId: number, oldCol: string, newCol: string) => void;
   onMoveError?: (err?: unknown) => void;
+  onMoveBlocked?: (message: string) => void;
 }
 
 // Custom collision detection: prefer pointerWithin, fallback to closestCenter
@@ -65,7 +76,7 @@ function VirtualizedColumnList({
   onMove,
   compact,
   selectable,
-  selectedIds,
+  selectedSet,
   onSelect,
   onBlock,
   onUnblock,
@@ -79,7 +90,7 @@ function VirtualizedColumnList({
   onMove: (id: number, newCol: string) => void;
   compact: boolean;
   selectable?: boolean;
-  selectedIds?: number[];
+  selectedSet?: Set<number>;
   onSelect?: (id: number) => void;
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
@@ -126,7 +137,7 @@ function VirtualizedColumnList({
                       onMove={onMove}
                       compact={compact}
                       selectable={selectable}
-                      selected={selectedIds?.includes(t.id)}
+                      selected={selectedSet?.has(t.id)}
                       onSelect={onSelect}
                       onBlock={onBlock}
                       onUnblock={onUnblock}
@@ -146,6 +157,9 @@ function VirtualizedColumnList({
 export default function KanbanBoard({
   columnas,
   tarjetas,
+  boardFilters,
+  columnTotals,
+  kanbanRules,
   onEdit,
   groupBy = 'none',
   compactView = false,
@@ -156,6 +170,7 @@ export default function KanbanBoard({
   onUnblock,
   onMoveSuccess,
   onMoveError,
+  onMoveBlocked,
 }: Props) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
@@ -181,12 +196,12 @@ export default function KanbanBoard({
   const batchMutation = useMutation({
     mutationFn: (items: { id: number; columna: string; posicion: number }[]) => api.batchUpdatePositions(items),
     onMutate: async (items) => {
-      // Save snapshot for rollback, then apply optimistic update
       let snapshot: [unknown, unknown][] = [];
       try {
         snapshot = queryClient.getQueriesData({ queryKey: ['tarjetas-board'] }) as [unknown, unknown][];
         await queryClient.cancelQueries({ queryKey: ['tarjetas-board'] });
         const byId = new Map(items.map(i => [i.id, i]));
+        const filters = boardFilters;
         for (const [key] of snapshot) {
           queryClient.setQueryData(key as Parameters<typeof queryClient.setQueryData>[0], (old: unknown) => {
             if (!old || typeof old !== 'object') return old;
@@ -198,10 +213,15 @@ export default function KanbanBoard({
                 if (!Array.isArray(page.tarjetas)) return page;
                 return {
                   ...page,
-                  tarjetas: page.tarjetas.map((t: TarjetaBoardItem) => {
-                    const upd = byId.get(t.id);
-                    return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
-                  }),
+                  tarjetas: page.tarjetas
+                    .map((t: TarjetaBoardItem) => {
+                      const upd = byId.get(t.id);
+                      if (!upd) return t;
+                      const next = { ...t, columna: upd.columna, posicion: upd.posicion };
+                      if (filters && !cardMatchesBoardFilters(next, filters)) return null;
+                      return next;
+                    })
+                    .filter((t): t is TarjetaBoardItem => t !== null),
                 };
               }),
             };
@@ -297,6 +317,39 @@ export default function KanbanBoard({
     if (overCard) setOverColumn(overCard.columna);
   }, [columnas, tarjetaById]);
 
+  const commitMove = useCallback((
+    draggedId: number,
+    destCol: string,
+    overId?: number,
+  ) => {
+    const draggedCard = tarjetaById.get(draggedId);
+    if (!draggedCard) return;
+
+    const destCount = (tarjetasPorColumna[destCol] || []).length;
+    const movingIn = draggedCard.columna !== destCol;
+    const effectiveDestCount = movingIn ? destCount : destCount;
+
+    const blockReason = canMoveToColumn(
+      draggedCard,
+      destCol,
+      columnas,
+      effectiveDestCount,
+      kanbanRules,
+    );
+    if (blockReason) {
+      onMoveBlocked?.(blockReason);
+      return;
+    }
+
+    const updates = buildPositionUpdates(draggedId, destCol, tarjetasPorColumna, overId);
+    if (!updates.length) return;
+
+    if (movingIn) {
+      lastMoveRef.current = { cardId: draggedId, oldCol: draggedCard.columna, newCol: destCol };
+    }
+    batchMutation.mutate(updates);
+  }, [tarjetaById, tarjetasPorColumna, columnas, kanbanRules, batchMutation, onMoveBlocked]);
+
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setActiveId(null);
     setOverColumn(null);
@@ -305,7 +358,7 @@ export default function KanbanBoard({
 
     const draggedId = Number(active.id);
     const draggedCard = tarjetaById.get(draggedId);
-    if (!draggedCard) return;
+    if (!draggedCard || draggedCard.bloqueada) return;
 
     let destCol: string;
     const colDest = columnas.find(c => c.key === String(over.id));
@@ -317,41 +370,13 @@ export default function KanbanBoard({
       destCol = overCard.columna;
     }
 
-    const sourceCards = (tarjetasPorColumna[draggedCard.columna] || []).filter(t => t.id !== draggedId);
-    let destCards: TarjetaBoardItem[];
-
-    if (destCol === draggedCard.columna) {
-      destCards = [...sourceCards];
-      const overIdx = destCards.findIndex(t => t.id === Number(over.id));
-      if (overIdx >= 0) destCards.splice(overIdx, 0, draggedCard);
-      else destCards.push(draggedCard);
-    } else {
-      destCards = [...(tarjetasPorColumna[destCol] || [])];
-      const overIdx = destCards.findIndex(t => t.id === Number(over.id));
-      if (overIdx >= 0) destCards.splice(overIdx, 0, draggedCard);
-      else destCards.push(draggedCard);
-    }
-
-    const updates: { id: number; columna: string; posicion: number }[] = [];
-    if (destCol !== draggedCard.columna) {
-      sourceCards.forEach((t, i) => updates.push({ id: t.id, columna: draggedCard.columna, posicion: i }));
-      lastMoveRef.current = { cardId: draggedId, oldCol: draggedCard.columna, newCol: destCol };
-    }
-    destCards.forEach((t, i) => updates.push({ id: t.id, columna: destCol, posicion: i }));
-
-    if (updates.length) batchMutation.mutate(updates);
-  }, [tarjetaById, columnas, tarjetasPorColumna, batchMutation]);
+    const overId = colDest ? undefined : Number(over.id);
+    commitMove(draggedId, destCol, overId);
+  }, [tarjetaById, columnas, commitMove]);
 
   const handleMoveViaDrop = useCallback((id: number, newCol: string) => {
-    const card = tarjetaById.get(id);
-    if (!card) return;
-    if (card.columna !== newCol) {
-      lastMoveRef.current = { cardId: id, oldCol: card.columna, newCol };
-    }
-    const destCards = [...(tarjetasPorColumna[newCol] || [])];
-    const updates = [{ id, columna: newCol, posicion: destCards.length }];
-    batchMutation.mutate(updates);
-  }, [tarjetaById, tarjetasPorColumna, batchMutation]);
+    commitMove(id, newCol);
+  }, [commitMove]);
 
   // Stable delete handler — avoids new function ref on each render
   const handleDelete = useCallback((id: number) => deleteMutation.mutate(id), [deleteMutation]);
@@ -433,37 +458,41 @@ export default function KanbanBoard({
       <div className="kanban-board" ref={boardRef}>
         {columnas.map(col => {
           const cards = tarjetasPorColumna[col.key] || [];
-          const wipExceeded = col.wip_limit != null && cards.length > col.wip_limit;
+          const totalInColumn = columnTotals?.[col.key] ?? cards.length;
+          const wipExceeded = col.wip_limit != null && totalInColumn > col.wip_limit;
+          const wipFull = col.wip_limit != null && totalInColumn >= col.wip_limit;
           const isOverTarget = overColumn === col.key;
 
           return (
-            <div key={col.key} className={`kanban-column ${isOverTarget ? 'drag-over' : ''} ${wipExceeded ? 'wip-exceeded' : ''}`}
+            <div key={col.key} className={`kanban-column ${isOverTarget ? 'drag-over' : ''} ${wipExceeded ? 'wip-exceeded' : ''} ${wipFull ? 'wip-full' : ''}`}
               data-column={col.key}>
               <div className="kanban-column-header" style={{ borderTopColor: col.color }}>
                 <div className="column-title-row">
                   <i className={col.icon} style={{ color: col.color }}></i>
                   <span className="column-title">{col.title}</span>
-                  <span className="column-count" style={{ background: col.color }}>{cards.length}</span>
+                  <span className="column-count" style={{ background: col.color }} title={columnTotals ? `${cards.length} cargadas de ${totalInColumn}` : undefined}>
+                    {columnTotals ? `${cards.length}/${totalInColumn}` : cards.length}
+                  </span>
                 </div>
                 {col.wip_limit != null && (
-                  <div className={`wip-indicator ${wipExceeded ? 'exceeded' : ''}`}>
-                    WIP: {cards.length}/{col.wip_limit}
+                  <div className={`wip-indicator ${wipExceeded ? 'exceeded' : ''} ${wipFull ? 'full' : ''}`}>
+                    WIP: {totalInColumn}/{col.wip_limit}
                     {wipExceeded && <i className="fas fa-exclamation-triangle ms-1"></i>}
                   </div>
                 )}
               </div>
 
-              {groupBy === 'none' && cards.length > VIRTUALIZATION_THRESHOLD ? (
+              {groupBy === 'none' && cards.length > VIRTUALIZATION_THRESHOLD && activeId === null ? (
                 <VirtualizedColumnList
                   cards={cards}
                   columnas={columnas}
                   col={col}
                   onEdit={onEdit}
-                  onDelete={(id: number) => deleteMutation.mutate(id)}
+                  onDelete={handleDelete}
                   onMove={handleMoveViaDrop}
                   compact={compactView}
                   selectable={selectable}
-                  selectedIds={selectedIds}
+                  selectedSet={selectedSet}
                   onSelect={onSelect}
                   onBlock={onBlock}
                   onUnblock={onUnblock}
@@ -510,7 +539,7 @@ export default function KanbanBoard({
       <DragOverlay>
         {activeTarjeta && (
           <div className="drag-overlay-card">
-            <TarjetaCard tarjeta={activeTarjeta} columnas={columnas} onEdit={() => { }} onDelete={() => { }} onMove={() => { }} compact={false} />
+            <TarjetaCard tarjeta={activeTarjeta} columnas={columnas} onEdit={() => { }} onDelete={() => { }} onMove={() => { }} compact={compactView} />
           </div>
         )}
       </DragOverlay>

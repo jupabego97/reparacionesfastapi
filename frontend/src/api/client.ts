@@ -198,6 +198,7 @@ export interface TarjetasBoardResponse {
   next_cursor?: string | null;
   bootstrap?: boolean;
   per_column?: number;
+  column_totals?: Record<string, number>;
   mode?: string;
   view?: string;
 }

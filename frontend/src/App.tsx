@@ -17,6 +17,7 @@ import BulkActionsBar from './components/BulkActionsBar';
 import { EmptyState, ErrorState } from './components/UiState';
 import { useDebounce } from './hooks/useDebounce';
 import { API_BASE } from './api/client';
+import { cardMatchesBoardFilters } from './utils/boardMoves';
 
 const NuevaTarjetaModal = lazy(() => import('./components/NuevaTarjetaModal'));
 const EditarTarjetaModal = lazy(() => import('./components/EditarTarjetaModal'));
@@ -26,7 +27,8 @@ const ExportarModal = lazy(() => import('./components/ExportarModal'));
 type ThemeMode = 'light' | 'dark';
 type ViewMode = 'kanban' | 'calendar';
 type ToastType = 'success' | 'warning' | 'info' | 'error';
-type BoardInfiniteData = InfiniteData<TarjetasBoardResponse, number>;
+type BoardPageParam = string | number | undefined;
+type BoardInfiniteData = InfiniteData<TarjetasBoardResponse, BoardPageParam>;
 
 type ReorderItem = { id: number; columna: string; posicion: number };
 type SocketEnvelope<T> = { event_version?: number; data?: T } | T;
@@ -86,23 +88,33 @@ function removeCardPatch(data: BoardInfiniteData | undefined, id: number): Board
   };
 }
 
-function applyReorderPatch(data: BoardInfiniteData | undefined, items: ReorderItem[]): BoardInfiniteData | undefined {
+function applyReorderPatch(
+  data: BoardInfiniteData | undefined,
+  items: ReorderItem[],
+  filters?: typeof DEFAULT_FILTROS,
+): BoardInfiniteData | undefined {
   if (!data || !items.length) return data;
   const byId = new Map(items.map(i => [i.id, i]));
   return {
     ...data,
     pages: data.pages.map(page => ({
       ...page,
-      tarjetas: page.tarjetas.map(t => {
-        const upd = byId.get(t.id);
-        return upd ? { ...t, columna: upd.columna, posicion: upd.posicion } : t;
-      }),
+      tarjetas: page.tarjetas
+        .map(t => {
+          const upd = byId.get(t.id);
+          if (!upd) return t;
+          const next = { ...t, columna: upd.columna, posicion: upd.posicion };
+          if (filters && !cardMatchesBoardFilters(next, filters)) return null;
+          return next;
+        })
+        .filter((t): t is TarjetaBoardItem => t !== null),
     })),
   };
 }
 
 async function fetchBoardCards(params: {
   cursor?: string;
+  page?: number;
   search?: string;
   estado?: string;
   prioridad?: string;
@@ -118,6 +130,7 @@ async function fetchBoardCards(params: {
     per_page: 200,
     per_column: 50,
     includeImageThumb: true,
+    includeTotals: true,
   });
 }
 
@@ -199,10 +212,11 @@ export default function App() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfiniteQuery<TarjetasBoardResponse, Error, BoardInfiniteData, typeof boardQueryKey, string | undefined>({
+  } = useInfiniteQuery<TarjetasBoardResponse, Error, BoardInfiniteData, typeof boardQueryKey, BoardPageParam>({
     queryKey: boardQueryKey,
     queryFn: ({ pageParam }) => fetchBoardCards({
-      cursor: pageParam,
+      cursor: typeof pageParam === 'string' ? pageParam : undefined,
+      page: typeof pageParam === 'number' ? pageParam : undefined,
       search: debouncedSearch || undefined,
       estado: filtros.estado || undefined,
       prioridad: filtros.prioridad || undefined,
@@ -213,7 +227,16 @@ export default function App() {
       orden_dir: filtros.orden_dir || undefined,
     }),
     initialPageParam: undefined,
-    getNextPageParam: lastPage => lastPage.next_cursor ?? undefined,
+    getNextPageParam: lastPage => {
+      if (lastPage.next_cursor != null && lastPage.next_cursor !== '') {
+        return lastPage.next_cursor;
+      }
+      const pag = lastPage.pagination;
+      if (pag?.has_next && typeof pag.page === 'number') {
+        return pag.page + 1;
+      }
+      return undefined;
+    },
     refetchOnWindowFocus: false,
     staleTime: 30_000, // 30s — socket events keep data fresh between refetches
     enabled: isAuthenticated,
@@ -362,8 +385,23 @@ export default function App() {
     reorderBufferRef.current = [];
     reorderTimerRef.current = null;
     if (!items.length) return;
-    qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyReorderPatch(old, items));
-  }, [qc]);
+    qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyReorderPatch(old, items, filtros));
+  }, [qc, filtros]);
+
+  const columnTotals = useMemo(() => {
+    if (!boardData?.pages?.length) return undefined;
+    for (const page of boardData.pages) {
+      if (page.column_totals) return page.column_totals;
+    }
+    return undefined;
+  }, [boardData]);
+
+  const { data: kanbanRules } = useQuery({
+    queryKey: ['kanban-rules'],
+    queryFn: api.getKanbanRules,
+    staleTime: 5 * 60_000,
+    enabled: isAuthenticated,
+  });
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -656,6 +694,12 @@ export default function App() {
       <BusquedaFiltros filtros={filtros} onChange={setFiltros} totalResults={tarjetas.length} users={users} tags={allTags}
         columnas={columnas.map(c => ({ key: c.key, title: c.title }))} />
 
+      {isFetchingNextPage && (
+        <div className="board-loading-banner" role="status" aria-live="polite">
+          <i className="fas fa-spinner fa-spin"></i> Cargando más tarjetas…
+        </div>
+      )}
+
       <div className="view-container" key={viewMode}>
       {viewMode === 'kanban' ? (
         <>
@@ -680,10 +724,14 @@ export default function App() {
               title="No hay tarjetas para mostrar"
               message={Object.values(filtros).some(Boolean) ? 'Pruebe limpiar o ajustar filtros.' : 'Cree su primera tarjeta para comenzar.'}
               actionLabel={Object.values(filtros).some(Boolean) ? 'Limpiar filtros' : 'Nueva tarjeta'}
-              onAction={() => Object.values(filtros).some(Boolean) ? setFiltros({ search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '' }) : setShowNew(true)}
+              onAction={() => Object.values(filtros).some(Boolean) ? setFiltros(DEFAULT_FILTROS) : setShowNew(true)}
             />
           ) : (
             <KanbanBoard columnas={columnas} tarjetas={tarjetas}
+              boardFilters={filtros}
+              columnTotals={columnTotals}
+              kanbanRules={kanbanRules}
+              isFetchingMore={isFetchingNextPage}
               onEdit={t => setEditCardId(t.id)} groupBy={groupBy} compactView={compactView}
               selectable={selectMode} selectedIds={selectedIds} onSelect={toggleSelect}
               onBlock={handleBlock} onUnblock={handleUnblock}
@@ -696,6 +744,7 @@ export default function App() {
                 }
                 setToast({ msg, type: 'error' });
               }}
+              onMoveBlocked={(msg) => setToast({ msg, type: 'warning' })}
               onMoveSuccess={(cardId, oldCol, newCol) => {
                 const colTitle = columnas.find(c => c.key === newCol)?.title || newCol;
                 setToast({ msg: `Tarjeta movida a ${colTitle}`, type: 'success' });

@@ -36,7 +36,7 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
-function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect, dragHandleProps, isDragging }: Props) {
+function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock, dragHandleProps, isDragging }: Props) {
   const t = tarjeta;
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
@@ -47,6 +47,24 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
   );
   const isBlocked = !!t.bloqueada;
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, .drag-handle, .drag-handle-compact, .card-checkbox, .tarjeta-col-arrows-overlay, .tarjeta-compact-arrows, .btn-block-card')) {
+      return;
+    }
+    onEdit(t);
+  };
+
+  const handleBlockClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isBlocked) {
+      onUnblock?.(t.id);
+      return;
+    }
+    const reason = window.prompt('Motivo del bloqueo (opcional):') ?? '';
+    onBlock?.(t.id, reason);
+  };
 
   // Column arrow navigation (disabled for blocked cards)
   const canMove = !isBlocked;
@@ -115,6 +133,7 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
       tabIndex={0}
       role="button"
       aria-label={`Tarjeta de ${t.nombre_propietario || 'Cliente'}`}
+      onClick={handleCardClick}
       onKeyDown={e => {
         if (e.key === 'Enter') onEdit(t);
         if (e.key === ' ' && selectable) {
@@ -251,6 +270,17 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           )}
         </div>
         <div className="tarjeta-footer-right">
+          {(onBlock || onUnblock) && (
+            <button
+              type="button"
+              className={`btn-action btn-block-card ${isBlocked ? 'blocked' : ''}`}
+              title={isBlocked ? 'Desbloquear tarjeta' : 'Bloquear tarjeta'}
+              aria-label={isBlocked ? 'Desbloquear tarjeta' : 'Bloquear tarjeta'}
+              onClick={handleBlockClick}
+            >
+              <i className={isBlocked ? 'fas fa-lock-open' : 'fas fa-lock'}></i>
+            </button>
+          )}
           {whatsUrl && (
             <button className="btn-wa-action btn-wa-big" title="Escribir por WhatsApp" onClick={e => { e.stopPropagation(); openWhatsAppSmart(t.whatsapp, `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim()); }}>
               <i className="fab fa-whatsapp"></i> WhatsApp

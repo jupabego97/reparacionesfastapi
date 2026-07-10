@@ -163,8 +163,13 @@ def test_pagination(db_session):
     assert data["pagination"]["has_next"] is True
 
 
-def test_board_view(sample_tarjeta):
+def test_board_requires_auth(sample_tarjeta):
     r = client.get("/api/tarjetas?view=board")
+    assert r.status_code == 401
+
+
+def test_board_view(sample_tarjeta, auth_headers):
+    r = client.get("/api/tarjetas?view=board", headers=auth_headers)
     assert r.status_code == 200
     data = r.json()
     assert data["view"] == "board"
@@ -172,7 +177,7 @@ def test_board_view(sample_tarjeta):
     assert "pagination" in data
 
 
-def test_board_fast_bootstrap_returns_all_columns(db_session):
+def test_board_fast_bootstrap_returns_all_columns(db_session, auth_headers):
     from datetime import datetime
 
     from app.models.repair_card import RepairCard
@@ -203,20 +208,21 @@ def test_board_fast_bootstrap_returns_all_columns(db_session):
     db_session.add_all(cards)
     db_session.commit()
 
-    r = client.get("/api/tarjetas?view=board&mode=fast")
+    r = client.get("/api/tarjetas?view=board&mode=fast", headers=auth_headers)
     assert r.status_code == 200
     data = r.json()
     assert data["view"] == "board"
     assert data["mode"] == "fast"
     assert data.get("bootstrap") is True
     assert data.get("per_column") == 50
+    assert "column_totals" in data
     columnas = {t["columna"] for t in data["tarjetas"]}
     assert "ingresado" in columnas
     assert "diagnosticada" in columnas
     assert "listos" in columnas
 
 
-def test_board_fast_bootstrap_no_auto_migrate(monkeypatch, db_session):
+def test_board_fast_bootstrap_no_auto_migrate(monkeypatch, db_session, auth_headers):
     from datetime import datetime
 
     from app.models.repair_card import RepairCard
@@ -238,12 +244,12 @@ def test_board_fast_bootstrap_no_auto_migrate(monkeypatch, db_session):
     ))
     db_session.commit()
 
-    r = client.get("/api/tarjetas?view=board&mode=fast")
+    r = client.get("/api/tarjetas?view=board&mode=fast", headers=auth_headers)
     assert r.status_code == 200
     assert migrate_calls == []
 
 
-def test_board_fast_remainder_pagination(db_session):
+def test_board_fast_remainder_pagination(db_session, auth_headers):
     from datetime import datetime
 
     from app.models.repair_card import RepairCard
@@ -257,14 +263,17 @@ def test_board_fast_remainder_pagination(db_session):
         ))
     db_session.commit()
 
-    r1 = client.get("/api/tarjetas?view=board&mode=fast&per_column=50")
+    r1 = client.get("/api/tarjetas?view=board&mode=fast&per_column=50", headers=auth_headers)
     assert r1.status_code == 200
     data1 = r1.json()
     assert data1.get("bootstrap") is True
     assert len(data1["tarjetas"]) == 50
     assert data1.get("next_cursor") == "0"
 
-    r2 = client.get(f"/api/tarjetas?view=board&mode=fast&per_column=50&cursor={data1['next_cursor']}")
+    r2 = client.get(
+        f"/api/tarjetas?view=board&mode=fast&per_column=50&cursor={data1['next_cursor']}",
+        headers=auth_headers,
+    )
     assert r2.status_code == 200
     data2 = r2.json()
     assert data2.get("bootstrap") is False

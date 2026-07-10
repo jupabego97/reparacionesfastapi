@@ -25,6 +25,7 @@ const noLayoutAnimation = () => false;
 function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock, disableDrag }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isSorting } = useSortable({
     id: tarjeta.id,
+    disabled: disableDrag || !!tarjeta.bloqueada,
     animateLayoutChanges: noLayoutAnimation,
   });
 

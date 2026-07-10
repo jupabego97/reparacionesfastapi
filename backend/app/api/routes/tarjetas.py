@@ -4,6 +4,7 @@ Mejoras integradas: prioridad, posición, asignación, notificaciones,
 costos, búsqueda server-side, S3 storage, soft delete, SQLite compat.
 """
 import base64
+import json
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -91,11 +92,98 @@ def _check_wip_limit(db: Session, column_key: str, exclude_card_id: int | None =
         )
         if exclude_card_id:
             q = q.filter(RepairCard.id != exclude_card_id)
+        # Lock rows in destination column to reduce WIP race under concurrency.
+        try:
+            q = q.with_for_update()
+        except Exception:
+            pass
         if q.count() >= col.wip_limit:
             raise HTTPException(
                 status_code=400,
                 detail=f"Límite WIP alcanzado en '{col.title}' ({col.wip_limit} máximo)"
             )
+
+
+def _ensure_not_blocked(card: RepairCard) -> None:
+    if card.blocked_at is not None:
+        reason = (card.blocked_reason or "").strip()
+        detail = f"Tarjeta bloqueada{f': {reason}' if reason else ''}"
+        raise HTTPException(status_code=400, detail=detail)
+
+
+def _required_field_ok(card: RepairCard, field: str) -> bool:
+    checks: dict[str, bool] = {
+        "nombre_propietario": bool((card.owner_name or "").strip()),
+        "problema": bool((card.problem or "").strip()) and (card.problem or "").strip() != "Sin descripción",
+        "whatsapp": bool((card.whatsapp_number or "").strip()),
+        "diagnosticada": card.diagnosticada_date is not None,
+        "costo_estimado": card.estimated_cost is not None,
+        "notas_tecnicas": bool((card.technical_notes or "").strip()),
+        "asignado_a": card.assigned_to is not None,
+    }
+    return checks.get(field, True)
+
+
+def _check_required_fields_for_column(db: Session, card: RepairCard, column_key: str) -> None:
+    col = db.query(KanbanColumn).filter(KanbanColumn.key == column_key).first()
+    if not col or not col.required_fields:
+        return
+    try:
+        required = json.loads(col.required_fields)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(required, list):
+        return
+    missing = [f for f in required if isinstance(f, str) and not _required_field_ok(card, f)]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Faltan campos requeridos para '{column_key}': {', '.join(missing)}",
+        )
+
+
+def _move_card_status(
+    db: Session,
+    card: RepairCard,
+    new_status: str,
+    user: User | None,
+    *,
+    notify: bool = True,
+) -> str | None:
+    """Aplica cambio de columna con reglas Kanban. Retorna old_status si hubo cambio."""
+    _ensure_not_blocked(card)
+    valid_statuses = _get_valid_statuses(db)
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Estado no válido. Permitidos: {valid_statuses}")
+
+    old_status = card.status
+    if old_status == new_status:
+        return None
+
+    _check_required_fields_for_column(db, card, new_status)
+    _check_wip_limit(db, new_status, exclude_card_id=card.id)
+
+    db.add(StatusHistory(
+        tarjeta_id=card.id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_at=datetime.now(UTC),
+        changed_by=user.id if user else None,
+        changed_by_name=user.full_name if user else None,
+    ))
+    if notify:
+        notificar_cambio_estado(db, card, old_status, new_status)
+
+    card.status = new_status
+    _apply_status_transition(card, new_status)
+    return old_status
+
+
+def _column_totals_map(db: Session, filter_clauses: list) -> dict[str, int]:
+    stmt = select(RepairCard.status, func.count()).group_by(RepairCard.status)
+    if filter_clauses:
+        stmt = stmt.where(*filter_clauses)
+    return {row[0]: int(row[1]) for row in db.execute(stmt).all()}
 
 
 def _media_rows_for_card(db: Session, tarjeta_id: int) -> list[RepairCardMedia]:
@@ -518,6 +606,7 @@ def _load_board_cards(db: Session, card_ids: list[int]) -> list[RepairCard]:
 @router.get("")
 def get_tarjetas(
     db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user_optional),
     page: int | None = Query(None),
     per_page: int | None = Query(None),
     light: int | None = Query(None),
@@ -540,6 +629,8 @@ def get_tarjetas(
 ):
     include_image = light != 1
     board_mode = (view or "").lower() == "board"
+    if board_mode and user is None:
+        raise HTTPException(status_code=401, detail="Autenticación requerida para el tablero")
     include_opts = {opt.strip().lower() for opt in (include or "").split(",") if opt.strip()}
     if board_mode:
         include_image = "image_thumb" in include_opts or "image" in include_opts
@@ -634,6 +725,7 @@ def get_tarjetas(
                 card_ids, has_remainder = _fetch_board_bootstrap_ids(db, filter_clauses, per_column_limit)
                 items = _load_board_cards(db, card_ids)
                 next_cursor = "0" if has_remainder else None
+                col_totals = _column_totals_map(db, filter_clauses)
                 data = {
                     "tarjetas": _serialize_board_items(items, db, include_image=False),
                     "pagination": {
@@ -647,6 +739,7 @@ def get_tarjetas(
                     "next_cursor": next_cursor,
                     "bootstrap": True,
                     "per_column": per_column_limit,
+                    "column_totals": col_totals,
                     "view": "board",
                     "mode": "fast",
                 }
@@ -658,6 +751,7 @@ def get_tarjetas(
                 )
                 items = _load_board_cards(db, remainder_ids)
                 next_cursor = str(items[-1].id) if (has_next and items) else None
+                col_totals = _column_totals_map(db, filter_clauses) if include_totals else None
                 data = {
                     "tarjetas": _serialize_board_items(items, db, include_image=False),
                     "pagination": {
@@ -670,6 +764,7 @@ def get_tarjetas(
                     },
                     "next_cursor": next_cursor,
                     "bootstrap": False,
+                    "column_totals": col_totals,
                     "view": "board",
                     "mode": "fast",
                 }
@@ -681,6 +776,7 @@ def get_tarjetas(
             page_items = fast_q.offset((page - 1) * per_page).limit(per_page + 1).all()
             has_next = len(page_items) > per_page
             items = page_items[:per_page]
+            col_totals = _column_totals_map(db, filter_clauses) if include_totals else None
             data = {
                 "tarjetas": _serialize_board_items(items, db, include_image=False),
                 "pagination": {
@@ -691,6 +787,7 @@ def get_tarjetas(
                     "has_next": has_next,
                     "has_prev": page > 1,
                 },
+                "column_totals": col_totals,
                 "view": "board",
                 "mode": "fast",
             }
@@ -943,26 +1040,7 @@ async def update_tarjeta(
     # Cambio de estado
     if "columna" in upd:
         nuevo = upd["columna"]
-        valid_statuses = _get_valid_statuses(db)
-        if nuevo not in valid_statuses:
-            raise HTTPException(status_code=400, detail=f"Estado no válido. Permitidos: {valid_statuses}")
-
-        _check_wip_limit(db, nuevo, exclude_card_id=id)
-
-        old_status = t.status
-        if old_status != nuevo:
-            db.add(StatusHistory(
-                tarjeta_id=t.id,
-                old_status=old_status,
-                new_status=nuevo,
-                changed_at=datetime.now(UTC),
-                changed_by=user.id if user else None,
-                changed_by_name=user.full_name if user else None,
-            ))
-            notificar_cambio_estado(db, t, old_status, nuevo)
-
-        t.status = nuevo
-        _apply_status_transition(t, nuevo)
+        _move_card_status(db, t, nuevo, user, notify=True)
 
     db.commit()
     db.refresh(t)
@@ -981,7 +1059,9 @@ async def update_tarjeta(
 # ──────────────────────────────────────────────────────────────
 
 @router.put("/batch/positions")
+@limiter.limit("60 per minute")
 async def batch_update_positions(
+    request: Request,
     data: BatchPosicionUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -990,31 +1070,23 @@ async def batch_update_positions(
     logger = logging.getLogger(__name__)
 
     try:
-        # Batch-load all cards in one query instead of O(N) queries
         item_ids = [item.id for item in data.items]
-        cards_by_id = {
-            t.id: t
-            for t in db.query(RepairCard).filter(RepairCard.id.in_(item_ids)).all()
-        }
+        lock_q = db.query(RepairCard).filter(RepairCard.id.in_(item_ids))
+        try:
+            locked_cards = lock_q.with_for_update().all()
+        except Exception:
+            locked_cards = lock_q.all()
+        cards_by_id = {t.id: t for t in locked_cards}
 
         changed: list[dict] = []
         for item in data.items:
             t = cards_by_id.get(item.id)
-            if t:
-                old_status = t.status
-                t.position = item.posicion
-                if t.status != item.columna:
-                    _check_wip_limit(db, item.columna, exclude_card_id=item.id)
-
-                    db.add(StatusHistory(
-                        tarjeta_id=t.id, old_status=old_status, new_status=item.columna,
-                        changed_at=datetime.now(UTC),
-                        changed_by=user.id,
-                        changed_by_name=user.full_name,
-                    ))
-                    t.status = item.columna
-                    _apply_status_transition(t, item.columna)
-                changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
+            if not t:
+                continue
+            if t.status != item.columna:
+                _move_card_status(db, t, item.columna, user, notify=True)
+            t.position = item.posicion
+            changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
 
         db.commit()
         invalidate_stats()
@@ -1049,15 +1121,13 @@ async def batch_operations(
     updated = []
     for t in cards:
         if data.action == "move" and data.value:
-            old_status = t.status
-            t.status = data.value
-            _apply_status_transition(t, data.value)
-            db.add(StatusHistory(
-                tarjeta_id=t.id, old_status=old_status, new_status=data.value,
-                changed_at=datetime.now(UTC),
-                changed_by=user.id,
-                changed_by_name=data.user_name or user.full_name,
-            ))
+            _move_card_status(
+                db,
+                t,
+                data.value,
+                user,
+                notify=True,
+            )
         elif data.action == "assign" and data.value is not None:
             t.assigned_to = int(data.value) if data.value else None
             t.assigned_name = data.assign_name or ""
