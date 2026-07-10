@@ -116,6 +116,7 @@ async function fetchBoardCards(params: {
     ...params,
     mode: 'fast',
     per_page: 200,
+    per_column: 50,
     includeImageThumb: true,
   });
 }
@@ -234,11 +235,22 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated || !hasNextPage || isFetchingNextPage) return;
-    const timer = window.setTimeout(() => {
+    const delayMs = (boardData?.pages?.length ?? 0) <= 1 ? 250 : 150;
+    const runFetch = () => {
       fetchNextPage().catch(() => undefined);
-    }, 50);
-    return () => window.clearTimeout(timer);
-  }, [isAuthenticated, hasNextPage, isFetchingNextPage, fetchNextPage]);
+    };
+    let idleId: number | undefined;
+    let timerId: number | undefined;
+    if (typeof requestIdleCallback !== 'undefined') {
+      idleId = requestIdleCallback(runFetch, { timeout: delayMs });
+    } else {
+      timerId = window.setTimeout(runFetch, delayMs);
+    }
+    return () => {
+      if (idleId != null && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleId);
+      if (timerId != null) window.clearTimeout(timerId);
+    };
+  }, [isAuthenticated, hasNextPage, isFetchingNextPage, fetchNextPage, boardData?.pages?.length]);
 
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({
     queryKey: ['columnas'],

@@ -196,6 +196,8 @@ export interface TarjetasBoardResponse {
     has_prev: boolean;
   };
   next_cursor?: string | null;
+  bootstrap?: boolean;
+  per_column?: number;
   mode?: string;
   view?: string;
 }
@@ -416,6 +418,7 @@ export const api = {
   async getTarjetasBoard(params?: {
     page?: number;
     per_page?: number;
+    per_column?: number;
     mode?: 'fast';
     cursor?: string;
     includeTotals?: boolean;
@@ -435,6 +438,7 @@ export const api = {
     if (params?.page != null) search.set('page', String(params.page));
     if (params?.cursor) search.set('cursor', params.cursor);
     if (params?.per_page != null) search.set('per_page', String(params.per_page));
+    if (params?.per_column != null) search.set('per_column', String(params.per_column));
     const includeOpts: string[] = [];
     if (params?.includeImageThumb) includeOpts.push('image_thumb');
     if (params?.includeTotals) includeOpts.push('totals');

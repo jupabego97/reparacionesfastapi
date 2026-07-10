@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, asc, case, delete, desc, exists, func, insert, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, defer
+from sqlalchemy.orm import Session, defer, load_only
 
 from app.core.cache import invalidate_stats
 from app.core.config import get_settings
@@ -118,21 +118,39 @@ def _resolve_media_url(raw_url: str | None, storage_key: str | None) -> str | No
 def _media_cover_map(db: Session, card_ids: list[int]) -> tuple[dict[int, str | None], dict[int, int]]:
     if not card_ids:
         return {}, {}
-    rows = db.query(RepairCardMedia).filter(
+
+    count_map: dict[int, int] = {}
+    for row in db.query(RepairCardMedia.tarjeta_id, func.count(RepairCardMedia.id)).filter(
         RepairCardMedia.tarjeta_id.in_(card_ids),
         RepairCardMedia.deleted_at.is_(None),
-    ).order_by(
-        RepairCardMedia.tarjeta_id.asc(),
-        RepairCardMedia.is_cover.desc(),
-        RepairCardMedia.position.asc(),
-        RepairCardMedia.id.asc(),
-    ).all()
+    ).group_by(RepairCardMedia.tarjeta_id).all():
+        count_map[row[0]] = row[1]
+
+    rn = func.row_number().over(
+        partition_by=RepairCardMedia.tarjeta_id,
+        order_by=(
+            RepairCardMedia.is_cover.desc(),
+            RepairCardMedia.position.asc(),
+            RepairCardMedia.id.asc(),
+        ),
+    ).label("rn")
+    ranked = (
+        select(
+            RepairCardMedia.tarjeta_id,
+            RepairCardMedia.thumb_url,
+            RepairCardMedia.url,
+            RepairCardMedia.storage_key,
+            rn,
+        )
+        .where(
+            RepairCardMedia.tarjeta_id.in_(card_ids),
+            RepairCardMedia.deleted_at.is_(None),
+        )
+        .subquery()
+    )
     cover_map: dict[int, str | None] = {}
-    count_map: dict[int, int] = {}
-    for row in rows:
-        count_map[row.tarjeta_id] = count_map.get(row.tarjeta_id, 0) + 1
-        if row.tarjeta_id not in cover_map:
-            cover_map[row.tarjeta_id] = _resolve_media_url(row.thumb_url or row.url, row.storage_key)
+    for row in db.execute(select(ranked).where(ranked.c.rn == 1)).all():
+        cover_map[row.tarjeta_id] = _resolve_media_url(row.thumb_url or row.url, row.storage_key)
     return cover_map, count_map
 
 
@@ -350,6 +368,128 @@ def _auto_migrate_legacy_for_cards(db: Session, cards: list[RepairCard], max_car
     return migrated
 
 
+def _repair_card_filter_clauses(
+    *,
+    include_deleted: bool,
+    search: str | None,
+    estado: str | None,
+    prioridad: str | None,
+    asignado_a: int | None,
+    cargador: str | None,
+    fecha_desde: str | None,
+    fecha_hasta: str | None,
+    tag: int | None,
+) -> list:
+    clauses = []
+    if not include_deleted:
+        clauses.append(RepairCard.deleted_at.is_(None))
+    if search:
+        search_term = f"%{search}%"
+        clauses.append(or_(
+            RepairCard.owner_name.ilike(search_term),
+            RepairCard.problem.ilike(search_term),
+            RepairCard.whatsapp_number.ilike(search_term),
+            RepairCard.technical_notes.ilike(search_term),
+        ))
+    if estado:
+        clauses.append(RepairCard.status == estado)
+    if prioridad:
+        clauses.append(RepairCard.priority == prioridad)
+    if asignado_a is not None:
+        clauses.append(RepairCard.assigned_to == asignado_a)
+    if cargador:
+        clauses.append(RepairCard.has_charger == cargador)
+    if fecha_desde:
+        clauses.append(RepairCard.start_date >= datetime.strptime(fecha_desde, "%Y-%m-%d"))
+    if fecha_hasta:
+        clauses.append(RepairCard.start_date <= datetime.strptime(fecha_hasta, "%Y-%m-%d"))
+    if tag is not None:
+        clauses.append(
+            exists(
+                select(repair_card_tags.c.repair_card_id).where(
+                    and_(
+                        repair_card_tags.c.repair_card_id == RepairCard.id,
+                        repair_card_tags.c.tag_id == tag,
+                    )
+                )
+            )
+        )
+    return clauses
+
+
+def _board_ranked_ids_subquery(filter_clauses: list):
+    ranked = func.row_number().over(
+        partition_by=RepairCard.status,
+        order_by=(RepairCard.position.asc(), RepairCard.id.desc()),
+    ).label("rn")
+    stmt = select(RepairCard.id, ranked)
+    if filter_clauses:
+        stmt = stmt.where(*filter_clauses)
+    return stmt.subquery()
+
+
+def _fetch_board_bootstrap_ids(db: Session, filter_clauses: list, per_column: int) -> tuple[list[int], bool]:
+    ranked = _board_ranked_ids_subquery(filter_clauses)
+    bootstrap_ids = db.execute(
+        select(ranked.c.id).where(ranked.c.rn <= per_column)
+    ).scalars().all()
+    has_remainder = db.execute(
+        select(func.count()).select_from(ranked).where(ranked.c.rn > per_column)
+    ).scalar() > 0
+    return list(bootstrap_ids), has_remainder
+
+
+def _fetch_board_remainder_ids(
+    db: Session,
+    filter_clauses: list,
+    per_column: int,
+    cursor_id: int | None,
+    per_page: int,
+) -> tuple[list[int], bool]:
+    ranked = _board_ranked_ids_subquery(filter_clauses)
+    stmt = select(ranked.c.id).where(ranked.c.rn > per_column)
+    if cursor_id is not None:
+        stmt = stmt.where(ranked.c.id > cursor_id)
+    stmt = stmt.order_by(ranked.c.id.asc()).limit(per_page + 1)
+    ids = db.execute(stmt).scalars().all()
+    has_next = len(ids) > per_page
+    return list(ids[:per_page]), has_next
+
+
+def _load_board_cards(db: Session, card_ids: list[int]) -> list[RepairCard]:
+    if not card_ids:
+        return []
+    return (
+        db.query(RepairCard)
+        .filter(RepairCard.id.in_(card_ids))
+        .options(
+            defer(RepairCard.image_url),
+            load_only(
+                RepairCard.id,
+                RepairCard.owner_name,
+                RepairCard.problem,
+                RepairCard.whatsapp_number,
+                RepairCard.status,
+                RepairCard.due_date,
+                RepairCard.has_charger,
+                RepairCard.technical_notes,
+                RepairCard.priority,
+                RepairCard.position,
+                RepairCard.assigned_to,
+                RepairCard.assigned_name,
+                RepairCard.blocked_at,
+                RepairCard.blocked_reason,
+                RepairCard.blocked_by,
+                RepairCard.ingresado_date,
+                RepairCard.diagnosticada_date,
+                RepairCard.para_entregar_date,
+                RepairCard.entregados_date,
+            ),
+        )
+        .all()
+    )
+
+
 # ──────────────────────────────────────────────────────────────
 # CRUD Endpoints
 # ──────────────────────────────────────────────────────────────
@@ -372,6 +512,7 @@ def get_tarjetas(
     view: str | None = Query(None),
     mode: str | None = Query(None),
     cursor: str | None = Query(None),
+    per_column: int | None = Query(None),
     include: str | None = Query(None),
     orden_por: str | None = Query(None),
     orden_dir: str | None = Query(None),
@@ -444,44 +585,91 @@ def get_tarjetas(
 
     if board_mode:
         per_page = min(per_page or 120, 200)
+        per_column_limit = min(max(per_column or 50, 1), 100)
         include_totals = "totals" in include_opts
         fast_mode = (mode or "").lower() == "fast"
+        filter_clauses = _repair_card_filter_clauses(
+            include_deleted=include_deleted,
+            search=search,
+            estado=estado,
+            prioridad=prioridad,
+            asignado_a=asignado_a,
+            cargador=cargador,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+            tag=tag,
+        )
 
         if fast_mode:
-            # Cursor pagination must use a deterministic order aligned with cursor field.
-            # When a custom sort is requested, skip the id-based cursor optimization to
-            # preserve the requested ordering across pages.
             use_cursor = not orden_por or orden_por == "posicion"
-            if use_cursor:
-                fast_q = q.options(defer(RepairCard.image_url)).order_by(None).order_by(RepairCard.id.asc())
-            else:
-                fast_q = q.options(defer(RepairCard.image_url))
             cursor_id: int | None = None
             if use_cursor and cursor:
                 try:
                     cursor_id = int(cursor)
                 except ValueError as err:
                     raise HTTPException(status_code=400, detail="Cursor invalido") from err
-                fast_q = fast_q.filter(RepairCard.id > cursor_id)
 
-            page_items = fast_q.limit(per_page + 1).all()
+            if use_cursor and cursor_id is None:
+                card_ids, has_remainder = _fetch_board_bootstrap_ids(db, filter_clauses, per_column_limit)
+                items = _load_board_cards(db, card_ids)
+                next_cursor = "0" if has_remainder else None
+                data = {
+                    "tarjetas": _serialize_board_items(items, db, include_image=False),
+                    "pagination": {
+                        "page": None,
+                        "per_page": per_page,
+                        "total": None,
+                        "pages": None,
+                        "has_next": has_remainder,
+                        "has_prev": False,
+                    },
+                    "next_cursor": next_cursor,
+                    "bootstrap": True,
+                    "per_column": per_column_limit,
+                    "view": "board",
+                    "mode": "fast",
+                }
+                return JSONResponse(content=data, headers=CACHE_HEADERS)
+
+            if use_cursor:
+                remainder_ids, has_next = _fetch_board_remainder_ids(
+                    db, filter_clauses, per_column_limit, cursor_id, per_page
+                )
+                items = _load_board_cards(db, remainder_ids)
+                next_cursor = str(items[-1].id) if (has_next and items) else None
+                data = {
+                    "tarjetas": _serialize_board_items(items, db, include_image=False),
+                    "pagination": {
+                        "page": None,
+                        "per_page": per_page,
+                        "total": None,
+                        "pages": None,
+                        "has_next": has_next,
+                        "has_prev": cursor_id is not None,
+                    },
+                    "next_cursor": next_cursor,
+                    "bootstrap": False,
+                    "view": "board",
+                    "mode": "fast",
+                }
+                return JSONResponse(content=data, headers=CACHE_HEADERS)
+
+            # Custom sort: offset pagination without bootstrap
+            fast_q = q.options(defer(RepairCard.image_url))
+            page = page or 1
+            page_items = fast_q.offset((page - 1) * per_page).limit(per_page + 1).all()
             has_next = len(page_items) > per_page
             items = page_items[:per_page]
-            _auto_migrate_legacy_for_cards(db, items, max_cards=20)
-            next_cursor = str(items[-1].id) if (use_cursor and has_next and items) else None
-            total = q.order_by(None).count() if include_totals else None
-            pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
             data = {
                 "tarjetas": _serialize_board_items(items, db, include_image=False),
                 "pagination": {
-                    "page": None,
+                    "page": page,
                     "per_page": per_page,
-                    "total": total,
-                    "pages": pages,
+                    "total": None,
+                    "pages": None,
                     "has_next": has_next,
-                    "has_prev": cursor_id is not None,
+                    "has_prev": page > 1,
                 },
-                "next_cursor": next_cursor,
                 "view": "board",
                 "mode": "fast",
             }
@@ -491,7 +679,6 @@ def get_tarjetas(
         page_items = q.offset((page - 1) * per_page).limit(per_page + 1).all()
         has_next = len(page_items) > per_page
         items = page_items[:per_page]
-        _auto_migrate_legacy_for_cards(db, items, max_cards=20)
         total = q.order_by(None).count() if include_totals else None
         pages = ((total + per_page - 1) // per_page) if (include_totals and total is not None) else None
         data = {

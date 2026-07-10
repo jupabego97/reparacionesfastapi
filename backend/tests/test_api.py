@@ -172,6 +172,105 @@ def test_board_view(sample_tarjeta):
     assert "pagination" in data
 
 
+def test_board_fast_bootstrap_returns_all_columns(db_session):
+    from datetime import datetime
+
+    from app.models.repair_card import RepairCard
+
+    now = datetime.now(UTC)
+    cards = [
+        RepairCard(
+            owner_name="Ingresado A", problem="P", status="ingresado",
+            start_date=now, due_date=now, ingresado_date=now,
+            priority="media", position=0,
+        ),
+        RepairCard(
+            owner_name="Ingresado B", problem="P", status="ingresado",
+            start_date=now, due_date=now, ingresado_date=now,
+            priority="media", position=1,
+        ),
+        RepairCard(
+            owner_name="Diagnostico A", problem="P", status="diagnosticada",
+            start_date=now, due_date=now, ingresado_date=now,
+            priority="media", position=0,
+        ),
+        RepairCard(
+            owner_name="Listo A", problem="P", status="listos",
+            start_date=now, due_date=now, ingresado_date=now,
+            priority="media", position=0,
+        ),
+    ]
+    db_session.add_all(cards)
+    db_session.commit()
+
+    r = client.get("/api/tarjetas?view=board&mode=fast")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["view"] == "board"
+    assert data["mode"] == "fast"
+    assert data.get("bootstrap") is True
+    assert data.get("per_column") == 50
+    columnas = {t["columna"] for t in data["tarjetas"]}
+    assert "ingresado" in columnas
+    assert "diagnosticada" in columnas
+    assert "listos" in columnas
+
+
+def test_board_fast_bootstrap_no_auto_migrate(monkeypatch, db_session):
+    from datetime import datetime
+
+    from app.models.repair_card import RepairCard
+
+    migrate_calls: list[int] = []
+
+    def _fake_migrate(*_args, **_kwargs):
+        migrate_calls.append(1)
+        return 0
+
+    monkeypatch.setattr("app.api.routes.tarjetas._auto_migrate_legacy_for_cards", _fake_migrate)
+
+    now = datetime.now(UTC)
+    db_session.add(RepairCard(
+        owner_name="Legacy", problem="P", status="ingresado",
+        start_date=now, due_date=now, ingresado_date=now,
+        priority="media", position=0,
+        image_url="data:image/jpeg;base64,abc",
+    ))
+    db_session.commit()
+
+    r = client.get("/api/tarjetas?view=board&mode=fast")
+    assert r.status_code == 200
+    assert migrate_calls == []
+
+
+def test_board_fast_remainder_pagination(db_session):
+    from datetime import datetime
+
+    from app.models.repair_card import RepairCard
+
+    now = datetime.now(UTC)
+    for i in range(55):
+        db_session.add(RepairCard(
+            owner_name=f"Ingresado {i}", problem="P", status="ingresado",
+            start_date=now, due_date=now, ingresado_date=now,
+            priority="media", position=i,
+        ))
+    db_session.commit()
+
+    r1 = client.get("/api/tarjetas?view=board&mode=fast&per_column=50")
+    assert r1.status_code == 200
+    data1 = r1.json()
+    assert data1.get("bootstrap") is True
+    assert len(data1["tarjetas"]) == 50
+    assert data1.get("next_cursor") == "0"
+
+    r2 = client.get(f"/api/tarjetas?view=board&mode=fast&per_column=50&cursor={data1['next_cursor']}")
+    assert r2.status_code == 200
+    data2 = r2.json()
+    assert data2.get("bootstrap") is False
+    assert len(data2["tarjetas"]) == 5
+
+
 def test_search_filter(db_session):
     from datetime import datetime
 

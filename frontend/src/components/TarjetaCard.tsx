@@ -73,7 +73,10 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
               src={compactThumb}
               alt="Equipo"
               className="tarjeta-compact-thumb"
+              width={28}
+              height={28}
               loading="lazy"
+              decoding="async"
               onClick={e => { e.stopPropagation(); window.open(t.imagen_url || t.cover_thumb_url || '', '_blank', 'noopener,noreferrer'); }}
               style={{ cursor: 'pointer' }}
             />
@@ -196,7 +199,10 @@ function TarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete: _onDelete, 
           src={t.cover_thumb_url || t.imagen_url || ''}
           alt="Equipo"
           className="tarjeta-thumbnail"
+          width={320}
+          height={140}
           loading="lazy"
+          decoding="async"
           onClick={e => { e.stopPropagation(); window.open(t.imagen_url || t.cover_thumb_url || '', '_blank', 'noopener,noreferrer'); }}
         />
       )}
