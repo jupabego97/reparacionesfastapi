@@ -58,3 +58,23 @@ def test_batch_positions_reindexes_columns(auth_headers, db_session):
     assert a.position == 0
     assert b.status == "ingresado"
     assert b.position == 0
+
+
+def test_batch_positions_rejects_invalid_transition(auth_headers, sample_tarjeta, db_session):
+    from app.api.routes.kanban import _ensure_default_columns
+    from app.models.kanban import KanbanColumn
+
+    _ensure_default_columns(db_session)
+    col = db_session.query(KanbanColumn).filter(KanbanColumn.key == "ingresado").first()
+    if col:
+        col.allowed_destinations = '["diagnosticada"]'
+        db_session.commit()
+
+    r = client.put(
+        "/api/tarjetas/batch/positions",
+        json={"items": [{"id": sample_tarjeta.id, "columna": "listos", "posicion": 0}]},
+        headers=auth_headers,
+    )
+    assert r.status_code == 400
+    msg = str(r.json().get("message") or r.json().get("detail") or "").lower()
+    assert "transición" in msg or "permitida" in msg

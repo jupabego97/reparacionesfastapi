@@ -1,16 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { DndContext, pointerWithin, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay, useDroppable } from '@dnd-kit/core';
-
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 768);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const handler = () => setIsMobile(mq.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  return isMobile;
-}
+import { useIsMobile } from '../hooks/useIsMobile';
 import type { DragEndEvent, DragStartEvent, DragOverEvent, CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useMutation, useQueryClient } from '@tanstack/react-query';

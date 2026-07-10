@@ -677,12 +677,6 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(0, 172, 193, 0.3);
   background: var(--accent-light);
-  animation: dragOverPulse 1.5s ease-in-out infinite;
-}
-
-@keyframes dragOverPulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(0, 172, 193, 0.3); }
-  50% { box-shadow: 0 0 0 4px rgba(0, 172, 193, 0.15); }
 }
 
 .kanban-column-body.droppable-over {

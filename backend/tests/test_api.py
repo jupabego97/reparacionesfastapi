@@ -222,31 +222,26 @@ def test_board_fast_bootstrap_returns_all_columns(db_session, auth_headers):
     assert "listos" in columnas
 
 
-def test_board_fast_bootstrap_no_auto_migrate(monkeypatch, db_session, auth_headers):
+def test_board_fast_bootstrap_includes_column_totals(db_session, auth_headers):
     from datetime import datetime
 
+    from app.api.routes.kanban import _ensure_default_columns
     from app.models.repair_card import RepairCard
 
-    migrate_calls: list[int] = []
-
-    def _fake_migrate(*_args, **_kwargs):
-        migrate_calls.append(1)
-        return 0
-
-    monkeypatch.setattr("app.api.routes.tarjetas._auto_migrate_legacy_for_cards", _fake_migrate)
-
+    _ensure_default_columns(db_session)
     now = datetime.now(UTC)
     db_session.add(RepairCard(
         owner_name="Legacy", problem="P", status="ingresado",
         start_date=now, due_date=now, ingresado_date=now,
         priority="media", position=0,
-        image_url="data:image/jpeg;base64,abc",
     ))
     db_session.commit()
 
-    r = client.get("/api/tarjetas?view=board&mode=fast", headers=auth_headers)
+    r = client.get("/api/tarjetas?view=board&mode=fast&include=totals", headers=auth_headers)
     assert r.status_code == 200
-    assert migrate_calls == []
+    data = r.json()
+    assert "column_totals" in data
+    assert data["column_totals"].get("ingresado", 0) >= 1
 
 
 def test_board_fast_remainder_pagination(db_session, auth_headers):

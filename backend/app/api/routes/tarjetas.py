@@ -142,6 +142,23 @@ def _check_required_fields_for_column(db: Session, card: RepairCard, column_key:
         )
 
 
+def _check_allowed_transition(db: Session, card: RepairCard, new_status: str) -> None:
+    if card.status == new_status:
+        return
+    col = db.query(KanbanColumn).filter(KanbanColumn.key == card.status).first()
+    if not col or not col.allowed_destinations:
+        return
+    try:
+        allowed = json.loads(col.allowed_destinations)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if isinstance(allowed, list) and allowed and new_status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transición no permitida: {card.status} → {new_status}",
+        )
+
+
 def _move_card_status(
     db: Session,
     card: RepairCard,
@@ -160,6 +177,7 @@ def _move_card_status(
     if old_status == new_status:
         return None
 
+    _check_allowed_transition(db, card, new_status)
     _check_required_fields_for_column(db, card, new_status)
     _check_wip_limit(db, new_status, exclude_card_id=card.id)
 
@@ -468,28 +486,11 @@ def _migrate_legacy_image_for_card(
     return item
 
 
-def _auto_migrate_legacy_for_cards(db: Session, cards: list[RepairCard], max_cards: int = 25) -> int:
-    settings = get_settings()
-    if not settings.use_s3_storage:
-        return 0
-    storage = get_storage_service()
-    if not storage.use_s3:
-        return 0
-
-    migrated = 0
-    for card in cards:
-        if migrated >= max_cards:
-            break
-        try:
-            item = _migrate_legacy_image_for_card(db, card, storage)
-            if item is not None:
-                db.commit()
-                migrated += 1
-        except Exception:
-            db.rollback()
-    if migrated > 0:
-        invalidate_stats()
-    return migrated
+def _parse_filter_date(value: str, field_name: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=f"Fecha inválida en {field_name}") from err
 
 
 def _repair_card_filter_clauses(
@@ -524,9 +525,9 @@ def _repair_card_filter_clauses(
     if cargador:
         clauses.append(RepairCard.has_charger == cargador)
     if fecha_desde:
-        clauses.append(RepairCard.start_date >= datetime.strptime(fecha_desde, "%Y-%m-%d"))
+        clauses.append(RepairCard.start_date >= _parse_filter_date(fecha_desde, "fecha_desde"))
     if fecha_hasta:
-        clauses.append(RepairCard.start_date <= datetime.strptime(fecha_hasta, "%Y-%m-%d"))
+        clauses.append(RepairCard.start_date <= _parse_filter_date(fecha_hasta, "fecha_hasta"))
     if tag is not None:
         clauses.append(
             exists(
@@ -660,9 +661,9 @@ def get_tarjetas(
     if cargador:
         q = q.filter(RepairCard.has_charger == cargador)
     if fecha_desde:
-        q = q.filter(RepairCard.start_date >= datetime.strptime(fecha_desde, "%Y-%m-%d"))
+        q = q.filter(RepairCard.start_date >= _parse_filter_date(fecha_desde, "fecha_desde"))
     if fecha_hasta:
-        q = q.filter(RepairCard.start_date <= datetime.strptime(fecha_hasta, "%Y-%m-%d"))
+        q = q.filter(RepairCard.start_date <= _parse_filter_date(fecha_hasta, "fecha_hasta"))
     if tag is not None:
         q = q.filter(
             exists(

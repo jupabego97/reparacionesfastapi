@@ -1,4 +1,6 @@
 import re
+
+import jwt
 import socketio
 from loguru import logger
 
@@ -33,9 +35,31 @@ sio = socketio.AsyncServer(
 )
 
 
+def _user_id_from_socket_auth(auth) -> int | None:
+    if not auth or not isinstance(auth, dict):
+        return None
+    token = auth.get("token")
+    if not token or not isinstance(token, str):
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+        )
+        return int(payload["sub"])
+    except Exception:
+        return None
+
+
 @sio.on("connect")
-async def connect(sid, env):
-    logger.info(f"Cliente conectado: {sid}")
+async def connect(sid, environ, auth):
+    user_id = _user_id_from_socket_auth(auth)
+    if user_id is None:
+        logger.warning(f"Socket rechazado sin JWT válido: {sid}")
+        return False
+    await sio.save_session(sid, {"user_id": user_id})
+    logger.info(f"Cliente autenticado conectado: {sid} (user {user_id})")
     await sio.emit("status", {"message": "Conectado al servidor en tiempo real"}, to=sid)
 
 
@@ -46,5 +70,9 @@ async def disconnect(sid):
 
 @sio.on("join")
 async def join(sid, data=None):
-    logger.info(f"Cliente se unió: {sid}")
+    session = await sio.get_session(sid)
+    user_id = session.get("user_id") if session else None
+    if not user_id:
+        return False
+    logger.info(f"Usuario {user_id} unido al canal: {sid}")
     await sio.emit("status", {"message": "Unido al canal de sincronización"}, to=sid)

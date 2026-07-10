@@ -176,6 +176,7 @@ export interface KanbanRules {
   wip_limits: Record<string, number>;
   sla_by_column: Record<string, number>;
   transition_requirements: Record<string, string[]>;
+  allowed_transitions: Record<string, string[]>;
 }
 
 export interface TimelineEvent {

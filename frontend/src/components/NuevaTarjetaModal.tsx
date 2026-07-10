@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, UserInfo, TarjetaCreate } from '../api/client';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 interface Props {
   onClose: () => void;
@@ -37,17 +38,6 @@ function defaultTomorrowDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   return d.toISOString().split('T')[0];
-}
-
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const handler = () => setIsMobile(mq.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  return isMobile;
 }
 
 function stopStream(video: HTMLVideoElement | null) {

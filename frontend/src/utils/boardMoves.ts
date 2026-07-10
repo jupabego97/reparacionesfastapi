@@ -117,6 +117,13 @@ export function canMoveToColumn(
   if (card.bloqueada) return 'Tarjeta bloqueada. Desbloquéala para moverla.';
   if (card.columna === destCol) return null;
 
+  const allowed = rules?.allowed_transitions?.[card.columna];
+  if (allowed?.length && !allowed.includes(destCol)) {
+    const fromTitle = columnas.find(c => c.key === card.columna)?.title || card.columna;
+    const toTitle = columnas.find(c => c.key === destCol)?.title || destCol;
+    return `No se puede mover de "${fromTitle}" a "${toTitle}"`;
+  }
+
   const col = columnas.find(c => c.key === destCol);
   const wipLimit = col?.wip_limit ?? rules?.wip_limits?.[destCol];
   if (wipLimit != null && destCardCount >= wipLimit) {

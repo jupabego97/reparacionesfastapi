@@ -22,17 +22,44 @@ from app.schemas.kanban import (
     TagUpdate,
 )
 from app.services.auth_service import get_current_user_optional, require_role
+from app.socket_events import sio
 
 router = APIRouter(prefix="/api", tags=["kanban"])
+
+
+async def _emit_tarjeta_activity(tarjeta_id: int, kind: str) -> None:
+    try:
+        await sio.emit(
+            "tarjeta_activity",
+            {"event_version": 1, "data": {"tarjeta_id": tarjeta_id, "kind": kind}},
+        )
+    except Exception:
+        pass
 
 
 # ==================== COLUMNAS (Mejora #2, #12) ====================
 
 DEFAULT_COLUMNS = [
-    {"key": "ingresado", "title": "Ingresado", "color": "#0369a1", "icon": "fas fa-inbox", "position": 0, "is_done_column": False},
-    {"key": "diagnosticada", "title": "En Diagnóstico", "color": "#92400e", "icon": "fas fa-stethoscope", "position": 1, "is_done_column": False},
-    {"key": "para_entregar", "title": "Listos para Entregar", "color": "#5b21b6", "icon": "fas fa-box-open", "position": 2, "is_done_column": False},
-    {"key": "listos", "title": "Completados", "color": "#065f46", "icon": "fas fa-check-circle", "position": 3, "is_done_column": True},
+    {
+        "key": "ingresado", "title": "Ingresado", "color": "#0369a1", "icon": "fas fa-inbox",
+        "position": 0, "is_done_column": False,
+        "allowed_destinations": '["diagnosticada"]',
+    },
+    {
+        "key": "diagnosticada", "title": "En Diagnóstico", "color": "#92400e", "icon": "fas fa-stethoscope",
+        "position": 1, "is_done_column": False,
+        "allowed_destinations": '["para_entregar", "ingresado"]',
+    },
+    {
+        "key": "para_entregar", "title": "Listos para Entregar", "color": "#5b21b6", "icon": "fas fa-box-open",
+        "position": 2, "is_done_column": False,
+        "allowed_destinations": '["listos", "diagnosticada"]',
+    },
+    {
+        "key": "listos", "title": "Completados", "color": "#065f46", "icon": "fas fa-check-circle",
+        "position": 3, "is_done_column": True,
+        "allowed_destinations": '["para_entregar"]',
+    },
 ]
 
 
@@ -51,6 +78,7 @@ def get_kanban_rules(db: Session = Depends(get_db)):
     wip_limits: dict[str, int] = {}
     sla_by_column: dict[str, int] = {}
     transition_requirements: dict[str, list[str]] = {}
+    allowed_transitions: dict[str, list[str]] = {}
     for col in cols:
         if col.wip_limit is not None:
             wip_limits[col.key] = col.wip_limit
@@ -61,10 +89,16 @@ def get_kanban_rules(db: Session = Depends(get_db)):
                 transition_requirements[col.key] = json.loads(col.required_fields)
             except Exception:
                 transition_requirements[col.key] = []
+        if col.allowed_destinations:
+            try:
+                allowed_transitions[col.key] = json.loads(col.allowed_destinations)
+            except Exception:
+                allowed_transitions[col.key] = []
     return {
         "wip_limits": wip_limits,
         "sla_by_column": sla_by_column,
         "transition_requirements": transition_requirements,
+        "allowed_transitions": allowed_transitions,
     }
 
 
@@ -88,6 +122,10 @@ def update_kanban_rules(
         col = by_key.get(key)
         if col:
             col.required_fields = json.dumps(fields, ensure_ascii=True)
+    for key, dests in data.allowed_transitions.items():
+        col = by_key.get(key)
+        if col:
+            col.allowed_destinations = json.dumps(dests, ensure_ascii=True)
     db.commit()
     return get_kanban_rules(db)
 
@@ -237,7 +275,7 @@ def get_subtasks(tarjeta_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/tarjetas/{tarjeta_id}/subtasks", status_code=201)
-def create_subtask(tarjeta_id: int, data: SubTaskCreate, db: Session = Depends(get_db)):
+async def create_subtask(tarjeta_id: int, data: SubTaskCreate, db: Session = Depends(get_db)):
     t = db.query(RepairCard).filter(RepairCard.id == tarjeta_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
@@ -246,11 +284,12 @@ def create_subtask(tarjeta_id: int, data: SubTaskCreate, db: Session = Depends(g
     db.add(st)
     db.commit()
     db.refresh(st)
+    await _emit_tarjeta_activity(tarjeta_id, "subtask")
     return st.to_dict()
 
 
 @router.put("/subtasks/{subtask_id}")
-def update_subtask(subtask_id: int, data: SubTaskUpdate, db: Session = Depends(get_db)):
+async def update_subtask(subtask_id: int, data: SubTaskUpdate, db: Session = Depends(get_db)):
     st = db.query(SubTask).filter(SubTask.id == subtask_id).first()
     if not st:
         raise HTTPException(status_code=404, detail="Sub-tarea no encontrada")
@@ -264,16 +303,19 @@ def update_subtask(subtask_id: int, data: SubTaskUpdate, db: Session = Depends(g
     st.completed = data.completed if data.completed is not None else st.completed
     db.commit()
     db.refresh(st)
+    await _emit_tarjeta_activity(st.tarjeta_id, "subtask")
     return st.to_dict()
 
 
 @router.delete("/subtasks/{subtask_id}", status_code=204)
-def delete_subtask(subtask_id: int, db: Session = Depends(get_db)):
+async def delete_subtask(subtask_id: int, db: Session = Depends(get_db)):
     st = db.query(SubTask).filter(SubTask.id == subtask_id).first()
     if not st:
         raise HTTPException(status_code=404, detail="Sub-tarea no encontrada")
+    tarjeta_id = st.tarjeta_id
     db.delete(st)
     db.commit()
+    await _emit_tarjeta_activity(tarjeta_id, "subtask")
     return None
 
 
@@ -286,7 +328,7 @@ def get_comments(tarjeta_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/tarjetas/{tarjeta_id}/comments", status_code=201)
-def create_comment(
+async def create_comment(
     tarjeta_id: int,
     data: CommentCreate,
     db: Session = Depends(get_db),
@@ -304,6 +346,7 @@ def create_comment(
     db.add(comment)
     db.commit()
     db.refresh(comment)
+    await _emit_tarjeta_activity(tarjeta_id, "comment")
     return comment.to_dict()
 
 

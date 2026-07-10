@@ -36,8 +36,8 @@ describe('boardMoves', () => {
     const updates = buildPositionUpdates(1, 'diagnosticada', grouped);
     expect(updates).toEqual([
       { id: 2, columna: 'ingresado', posicion: 0 },
-      { id: 1, columna: 'diagnosticada', posicion: 0 },
-      { id: 3, columna: 'diagnosticada', posicion: 1 },
+      { id: 3, columna: 'diagnosticada', posicion: 0 },
+      { id: 1, columna: 'diagnosticada', posicion: 1 },
     ]);
   });
 
@@ -52,5 +52,16 @@ describe('boardMoves', () => {
     const columnas = [{ key: 'diagnosticada', title: 'Diag', color: '#000', icon: 'x', position: 1, wip_limit: 2 }];
     const reason = canMoveToColumn(c, 'diagnosticada', columnas as never, 2, undefined);
     expect(reason).toMatch(/WIP/i);
+  });
+
+  it('canMoveToColumn blocks disallowed transitions', () => {
+    const c = card({ id: 1, columna: 'ingresado', posicion: 0 });
+    const columnas = [
+      { key: 'ingresado', title: 'Ingresado', color: '#000', icon: 'x', position: 0 },
+      { key: 'listos', title: 'Listos', color: '#000', icon: 'x', position: 3 },
+    ];
+    const rules = { wip_limits: {}, sla_by_column: {}, transition_requirements: {}, allowed_transitions: { ingresado: ['diagnosticada'] } };
+    const reason = canMoveToColumn(c, 'listos', columnas as never, 0, rules);
+    expect(reason).toMatch(/No se puede mover/i);
   });
 });

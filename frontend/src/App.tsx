@@ -16,6 +16,7 @@ import CalendarView from './components/CalendarView';
 import BulkActionsBar from './components/BulkActionsBar';
 import { EmptyState, ErrorState } from './components/UiState';
 import { useDebounce } from './hooks/useDebounce';
+import { useIsMobile } from './hooks/useIsMobile';
 import { API_BASE } from './api/client';
 import { cardMatchesBoardFilters } from './utils/boardMoves';
 
@@ -134,19 +135,8 @@ async function fetchBoardCards(params: {
   });
 }
 
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const handler = () => setIsMobile(mq.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  return isMobile;
-}
-
 export default function App() {
-  const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, logout, loading: authLoading, token } = useAuth();
   const qc = useQueryClient();
   const isMobile = useIsMobile();
   const [mobileHome, setMobileHome] = useState(true);
@@ -302,6 +292,11 @@ export default function App() {
     if (preferences.theme && preferences.theme !== theme) {
       setTheme(preferences.theme);
     }
+    if (preferences.density === 'compact') {
+      setCompactView(true);
+    } else if (preferences.density === 'comfortable') {
+      setCompactView(false);
+    }
     if (preferences.default_view) {
       const found = preferences.saved_views.find(v => v.id === preferences.default_view);
       if (found) {
@@ -396,6 +391,13 @@ export default function App() {
     return undefined;
   }, [boardData]);
 
+  const totalFilteredResults = useMemo(() => {
+    if (columnTotals) {
+      return Object.values(columnTotals).reduce((sum, n) => sum + n, 0);
+    }
+    return tarjetas.length;
+  }, [columnTotals, tarjetas.length]);
+
   const { data: kanbanRules } = useQuery({
     queryKey: ['kanban-rules'],
     queryFn: api.getKanbanRules,
@@ -404,12 +406,13 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !token) return;
 
     const url = API_BASE || window.location.origin;
     const safeModeEnv = import.meta.env.VITE_SOCKETIO_SAFE_MODE;
     const safeMode = safeModeEnv ? safeModeEnv === 'true' : import.meta.env.PROD;
     const s = io(url, {
+      auth: { token },
       transports: safeMode ? ['polling'] : ['polling', 'websocket'],
       upgrade: !safeMode,
       reconnection: true,
@@ -451,6 +454,15 @@ export default function App() {
       }
     });
 
+    s.on('tarjeta_activity', (payload: SocketEnvelope<{ tarjeta_id?: number; kind?: string }>) => {
+      const data = unwrapSocketData(payload);
+      if (!data?.tarjeta_id) return;
+      void qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+      if (editCardId === data.tarjeta_id) {
+        void qc.invalidateQueries({ queryKey: ['tarjeta', data.tarjeta_id] });
+      }
+    });
+
     setConnStatus('connecting');
     return () => {
       if (reorderTimerRef.current != null) {
@@ -458,7 +470,7 @@ export default function App() {
       }
       s.disconnect();
     };
-  }, [isAuthenticated, qc, flushReorderBuffer]);
+  }, [isAuthenticated, token, qc, flushReorderBuffer, editCardId]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
@@ -678,7 +690,16 @@ export default function App() {
             <option value="priority">Por prioridad</option>
             <option value="assignee">Por tecnico</option>
           </select>
-          <button className={`toolbar-btn ${compactView ? 'active' : ''}`} onClick={() => setCompactView(!compactView)}
+          <button className={`toolbar-btn ${compactView ? 'active' : ''}`} onClick={() => {
+            const next = !compactView;
+            setCompactView(next);
+            prefsMutation.mutate({
+              ...DEFAULT_PREFERENCES,
+              ...preferences,
+              density: next ? 'compact' : 'comfortable',
+              theme,
+            });
+          }}
             title="Vista compacta" aria-label="Alternar vista compacta">
             <i className={compactView ? 'fas fa-th-list' : 'fas fa-th-large'}></i> <span className="btn-text">Compacta</span>
           </button>
@@ -691,7 +712,7 @@ export default function App() {
         </div>
       </div>
 
-      <BusquedaFiltros filtros={filtros} onChange={setFiltros} totalResults={tarjetas.length} users={users} tags={allTags}
+      <BusquedaFiltros filtros={filtros} onChange={setFiltros} totalResults={totalFilteredResults} users={users} tags={allTags}
         columnas={columnas.map(c => ({ key: c.key, title: c.title }))} />
 
       {isFetchingNextPage && (

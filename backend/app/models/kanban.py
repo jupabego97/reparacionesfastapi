@@ -32,6 +32,7 @@ class KanbanColumn(Base):
     is_done_column = Column(Boolean, nullable=False, default=False)
     sla_hours = Column(Integer, nullable=True)                    # Alerta SLA (horas máx en esta columna)
     required_fields = Column(Text, nullable=True)                 # JSON: campos requeridos para entrar
+    allowed_destinations = Column(Text, nullable=True)            # JSON: columnas destino permitidas
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict:
@@ -47,6 +48,7 @@ class KanbanColumn(Base):
             "is_done_column": self.is_done_column,
             "sla_hours": self.sla_hours,
             "required_fields": json.loads(self.required_fields) if self.required_fields else [],
+            "allowed_destinations": json.loads(self.allowed_destinations) if self.allowed_destinations else [],
         }
 
 
