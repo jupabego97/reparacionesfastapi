@@ -214,6 +214,22 @@ body {
   border-color: #7f1d1d;
 }
 
+.login-success {
+  margin: 0.75rem 1.5rem 0;
+  padding: 0.5rem 0.75rem;
+  background: #ecfdf5;
+  color: #047857;
+  border-radius: var(--radius-sm);
+  border: 1px solid #a7f3d0;
+  font-size: 0.875rem;
+}
+
+[data-theme="dark"] .login-success {
+  background: #052e16;
+  border-color: #065f46;
+  color: #6ee7b7;
+}
+
 .login-form {
   padding: 1.5rem;
 }
@@ -2680,6 +2696,12 @@ body {
   }
 
   .modal-pro-body .login-error {
+    margin: 0 0 0.5rem 0;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+  }
+
+  .modal-pro-body .login-success {
     margin: 0 0 0.5rem 0;
     padding: 0.4rem 0.6rem;
     font-size: 0.75rem;

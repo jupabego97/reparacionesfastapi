@@ -10,7 +10,7 @@ interface Props {
 
 const JPEG_QUALITY = 0.75;
 const MAX_IMAGE_PX = 800;
-const AI_TIMEOUT_MS = 30_000;
+const AI_TIMEOUT_MS = 15_000;
 
 type CaptureStep = 'capture' | 'preview' | 'processing' | 'form';
 type AiPhase = 'idle' | 'optimizing' | 'analyzing' | 'done' | 'failed';
@@ -88,6 +88,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     notas_tecnicas: '',
   });
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
+  const [successMsg, setSuccessMsg] = useState('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -183,6 +184,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
 
     setLoading(true);
     setError('');
+    setSuccessMsg('');
     setAiPhase('optimizing');
     setStep('processing');
 
@@ -211,6 +213,15 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
         setError(result.error || 'IA no disponible. Completa los datos manualmente.');
       } else {
         setAiPhase('done');
+        const parts: string[] = [];
+        if (result.nombre && result.nombre !== 'Cliente') parts.push(`nombre: ${result.nombre}`);
+        if (result.telefono) parts.push(`teléfono: ${result.telefono}`);
+        parts.push(`cargador: ${result.tiene_cargador ? 'sí' : 'no'}`);
+        setSuccessMsg(
+          parts.length > 1
+            ? `IA completó los datos (${parts.join(' · ')}). Revisa y ajusta si hace falta.`
+            : 'IA analizó la imagen. Revisa los campos y completa lo que falte.',
+        );
       }
     } catch (err) {
       if (controller.signal.aborted || closedRef.current) return;
@@ -246,6 +257,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     if (img) setForm(prev => ({ ...prev, imagen_url: img }));
     setCapturedPreview(null);
     setAiPhase('failed');
+    setSuccessMsg('');
     setError('Análisis omitido. Completa los datos manualmente.');
     setStep('form');
     setLoading(false);
@@ -255,6 +267,7 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
     abortRef.current?.abort();
     setCapturedPreview(null);
     setAiPhase('idle');
+    setSuccessMsg('');
     setError('');
     setCameraActive(true);
     setStep('capture');
@@ -351,6 +364,9 @@ export default function NuevaTarjetaModal({ onClose, onSuccess }: Props) {
         <div className="modal-pro-body">
           {error && step !== 'processing' && (
             <div className="login-error"><i className="fas fa-exclamation-triangle"></i> {error}</div>
+          )}
+          {successMsg && step === 'form' && (
+            <div className="login-success"><i className="fas fa-check-circle"></i> {successMsg}</div>
           )}
 
           {step === 'capture' && (

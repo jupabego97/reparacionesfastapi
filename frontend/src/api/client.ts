@@ -665,7 +665,7 @@ export const api = {
     imageData: string,
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<{ nombre: string; telefono: string; tiene_cargador: boolean; _partial?: boolean; error?: string }> {
-    const timeoutMs = options?.timeoutMs ?? 30_000;
+    const timeoutMs = options?.timeoutMs ?? 15_000;
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     if (options?.signal) {

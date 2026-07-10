@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from google.genai.errors import APIError, ClientError, ServerError
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -18,8 +19,8 @@ router = APIRouter(prefix="/api", tags=["multimedia"])
 
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-# Timeout de la llamada a Gemini (imagen/audio). El cliente usa un margen similar.
-GEMINI_TIMEOUT_SECONDS = 25
+# Timeout de la llamada a Gemini (imagen/audio). Alineado con el cliente (~15s).
+GEMINI_TIMEOUT_SECONDS = 15
 
 
 class ProcesarImagenBody(BaseModel):
@@ -35,6 +36,43 @@ def _ia_unavailable_response() -> JSONResponse:
             "_partial": True,
         },
     )
+
+
+def _partial_ia_response(
+    status_code: int,
+    error_message: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": error_message,
+            **FALLBACK_IA,
+            "_partial": True,
+        },
+    )
+
+
+def _gemini_error_status(exc: Exception) -> tuple[int, str]:
+    """Mapea excepciones de Gemini a código HTTP y mensaje amigable."""
+    if isinstance(exc, ClientError):
+        code = int(getattr(exc, "code", 400) or 400)
+        if code == 429:
+            return 429, "Cuota de IA agotada. Completa los datos manualmente."
+        if code in (401, 403):
+            return 503, "Servicio de IA no configurado correctamente."
+        if code == 408:
+            return 408, "La IA tardó demasiado. Completa los datos manualmente."
+        return 500, "Error procesando la imagen"
+    if isinstance(exc, ServerError):
+        return 503, "Servicio de IA temporalmente no disponible."
+    if isinstance(exc, APIError):
+        code = int(getattr(exc, "code", 500) or 500)
+        if code == 429:
+            return 429, "Cuota de IA agotada. Completa los datos manualmente."
+        if 500 <= code < 600:
+            return 503, "Servicio de IA temporalmente no disponible."
+        return 500, "Error procesando la imagen"
+    return 500, "Error procesando la imagen"
 
 
 @router.post("/procesar-imagen")
@@ -57,10 +95,7 @@ async def procesar_imagen(
         )
         if not isinstance(result, dict):
             logger.error(f"Resultado inesperado de Gemini: {type(result)}")
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Respuesta inválida del servicio de IA", **FALLBACK_IA, "_partial": True},
-            )
+            return _partial_ia_response(500, "Respuesta inválida del servicio de IA")
         return {
             "nombre": str(result.get("nombre") or "Cliente"),
             "telefono": str(result.get("telefono") or ""),
@@ -68,24 +103,14 @@ async def procesar_imagen(
         }
     except asyncio.TimeoutError:
         logger.warning("Timeout procesando imagen con Gemini")
-        return JSONResponse(
-            status_code=408,
-            content={
-                "error": "La IA tardó demasiado. Completa los datos manualmente.",
-                **FALLBACK_IA,
-                "_partial": True,
-            },
+        return _partial_ia_response(
+            408,
+            "La IA tardó demasiado. Completa los datos manualmente.",
         )
     except Exception as e:
         logger.exception(f"Error procesando imagen: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Error procesando la imagen",
-                **FALLBACK_IA,
-                "_partial": True,
-            },
-        )
+        status_code, message = _gemini_error_status(e)
+        return _partial_ia_response(status_code, message)
 
 
 @router.post("/transcribir-audio")
@@ -113,6 +138,13 @@ async def transcribir_audio(
         return {"transcripcion": transcripcion}
     except asyncio.TimeoutError as err:
         raise HTTPException(status_code=408, detail="Timeout procesando audio") from err
+    except ClientError as e:
+        code = int(getattr(e, "code", 400) or 400)
+        if code == 429:
+            raise HTTPException(status_code=429, detail="Cuota de IA agotada") from e
+        raise HTTPException(status_code=500, detail="Error al transcribir audio") from e
+    except ServerError as e:
+        raise HTTPException(status_code=503, detail="Servicio de IA no disponible") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail="Error al transcribir audio") from e
 

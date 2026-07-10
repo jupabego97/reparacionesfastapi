@@ -112,8 +112,8 @@ def test_procesar_imagen_with_auth_when_gemini_unavailable(auth_headers):
         json={"image": "data:image/jpeg;base64,abc"},
         headers=auth_headers,
     )
-    # Sin GEMINI_API_KEY: 503 con fallback parcial; con key inválida/otra falla: 4xx/5xx
-    assert r.status_code in (408, 500, 503)
+    # Sin GEMINI_API_KEY: 503 con fallback parcial; con key inválida/otra falla: 4xx/5xx/429
+    assert r.status_code in (408, 429, 500, 503)
     if r.status_code == 503:
         body = r.json()
         assert body.get("nombre") == "Cliente"
