@@ -34,6 +34,19 @@ type BoardInfiniteData = InfiniteData<TarjetasBoardResponse, BoardPageParam>;
 type ReorderItem = { id: number; columna: string; posicion: number };
 type SocketEnvelope<T> = { event_version?: number; data?: T } | T;
 
+function PwaUpdateBanner({ onUpdate }: { onUpdate: () => void }) {
+  return (
+    <div className="pwa-update-banner" role="status" aria-live="polite">
+      <span>
+        <i className="fas fa-sync-alt"></i> Hay una nueva versión disponible.
+      </span>
+      <button type="button" onClick={onUpdate}>
+        Actualizar
+      </button>
+    </div>
+  );
+}
+
 function unwrapSocketData<T>(payload: SocketEnvelope<T>): T {
   if (payload && typeof payload === 'object' && 'data' in payload) {
     return (payload as { data: T }).data;
@@ -150,6 +163,26 @@ export default function App() {
   }, [theme]);
 
   const [connStatus, setConnStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState(false);
+  useEffect(() => {
+    const showUpdate = () => setPwaUpdateAvailable(true);
+    window.addEventListener('pwa-update-available', showUpdate);
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration()
+        .then(registration => {
+          if (registration?.waiting) showUpdate();
+        })
+        .catch(() => {/* silencioso */});
+    }
+
+    return () => window.removeEventListener('pwa-update-available', showUpdate);
+  }, []);
+
+  const applyPwaUpdate = useCallback(() => {
+    setPwaUpdateAvailable(false);
+    window.dispatchEvent(new Event('pwa-activate-update'));
+  }, []);
 
   const [showNew, setShowNew] = useState(false);
   const [editCardId, setEditCardId] = useState<number | null>(null);
@@ -555,6 +588,8 @@ export default function App() {
     return <LoginScreen />;
   }
 
+  const pwaUpdateBanner = pwaUpdateAvailable ? <PwaUpdateBanner onUpdate={applyPwaUpdate} /> : null;
+
   if (isMobile && mobileHome) {
     return (
       <div className="app" data-theme={theme}>
@@ -576,6 +611,7 @@ export default function App() {
             </button>
           </div>
           <ConexionBadge status={connStatus} />
+          {pwaUpdateBanner}
         </div>
 
         <Suspense fallback={null}>
@@ -652,6 +688,7 @@ export default function App() {
           </div>
         </div>
       </header>
+      {pwaUpdateBanner}
 
       <div className="toolbar-row">
         <div className="toolbar-left">

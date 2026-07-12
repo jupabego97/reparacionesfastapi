@@ -2103,6 +2103,47 @@ body {
   color: #fca5a5;
 }
 
+/* ==================== PWA Update ==================== */
+.pwa-update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.7rem 0.85rem 0.7rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.65rem;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  transform: translateX(-50%);
+}
+
+.pwa-update-banner span {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+}
+
+.pwa-update-banner span i {
+  color: var(--accent);
+}
+
+.pwa-update-banner button {
+  border: 0;
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 /* ==================== Capture Step ==================== */
 .capture-step {
   text-align: center;
