@@ -40,11 +40,25 @@ function isOverdue(fechaLimite: string | null): boolean {
 
 function formatEntryDateTime(value: string | null | undefined, compact = false): string {
   if (!value) return '';
-  const [datePart, timePart = ''] = value.replace('T', ' ').split(' ');
-  const [year, month, day] = datePart.split('-');
-  if (!year || !month || !day) return value;
-  const date = compact ? `${day}/${month}` : `${day}/${month}/${year}`;
-  return timePart ? `${date} ${timePart.slice(0, 5)}` : date;
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const utcValue = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`;
+  const date = new Date(utcValue);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const calendarDate = compact
+    ? `${values.day}/${values.month}`
+    : `${values.day}/${values.month}/${values.year}`;
+  return `${calendarDate} ${values.hour}:${values.minute}`;
 }
 
 function TarjetaCardComponent({
