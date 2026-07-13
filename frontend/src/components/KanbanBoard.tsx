@@ -34,6 +34,7 @@ interface Props {
   onMoveSuccess?: (cardId: number, oldCol: string, newCol: string) => void;
   onMoveError?: (err?: unknown) => void;
   onMoveBlocked?: (message: string) => void;
+  highlightCardIds?: number[];
 }
 
 // Custom collision detection: prefer pointerWithin, fallback to closestCenter
@@ -71,6 +72,7 @@ function VirtualizedColumnList({
   onBlock,
   onUnblock,
   disableDrag,
+  highlightedIds,
 }: {
   cards: TarjetaBoardItem[];
   columnas: KanbanColumn[];
@@ -85,6 +87,7 @@ function VirtualizedColumnList({
   onBlock?: (id: number, reason: string) => void;
   onUnblock?: (id: number) => void;
   disableDrag?: boolean;
+  highlightedIds?: Set<number>;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
@@ -132,6 +135,7 @@ function VirtualizedColumnList({
                       onBlock={onBlock}
                       onUnblock={onUnblock}
                       disableDrag={disableDrag}
+                      highlighted={highlightedIds?.has(t.id)}
                     />
                   </div>
                 );
@@ -161,6 +165,7 @@ export default function KanbanBoard({
   onMoveSuccess,
   onMoveError,
   onMoveBlocked,
+  highlightCardIds,
 }: Props) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
@@ -373,6 +378,20 @@ export default function KanbanBoard({
 
   // Memoized selected set for O(1) lookup instead of Array.includes per card
   const selectedSet = useMemo(() => new Set(selectedIds || []), [selectedIds]);
+  const highlightedSet = useMemo(() => new Set(highlightCardIds || []), [highlightCardIds]);
+  const manyColumns = columnas.length > 4;
+  const standardColumns = columnas.length <= 4;
+
+  const columnStats = useMemo(() => {
+    const stats: Record<string, { blocked: number; maxDays: number }> = {};
+    columnas.forEach(c => { stats[c.key] = { blocked: 0, maxDays: 0 }; });
+    tarjetas.forEach(t => {
+      if (!stats[t.columna]) return;
+      if (t.bloqueada) stats[t.columna].blocked += 1;
+      stats[t.columna].maxDays = Math.max(stats[t.columna].maxDays, t.dias_en_columna || 0);
+    });
+    return stats;
+  }, [tarjetas, columnas]);
 
   const scrollToColumn = useCallback((index: number) => {
     const board = boardRef.current;
@@ -421,13 +440,14 @@ export default function KanbanBoard({
       onBlock={onBlock}
       onUnblock={onUnblock}
       disableDrag={isMobile}
+      highlighted={highlightedSet.has(t.id)}
     />
-  ), [columnas, onEdit, handleDelete, handleMoveViaDrop, compactView, selectable, selectedSet, onSelect, onBlock, onUnblock, isMobile]);
+  ), [columnas, onEdit, handleDelete, handleMoveViaDrop, compactView, selectable, selectedSet, onSelect, onBlock, onUnblock, isMobile, highlightedSet]);
 
   return (
     <DndContext sensors={sensors} collisionDetection={kanbanCollision}
       onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
-      {isMobile && (
+      {(isMobile || manyColumns) && (
         <div className="kanban-column-tabs" role="tablist" aria-label="Columnas del tablero">
           {columnas.map((col, i) => (
             <button
@@ -445,13 +465,17 @@ export default function KanbanBoard({
           ))}
         </div>
       )}
-      <div className="kanban-board" ref={boardRef}>
+      <div className={`kanban-board ${standardColumns ? 'columns-standard' : 'columns-many'}`} ref={boardRef}>
         {columnas.map(col => {
           const cards = tarjetasPorColumna[col.key] || [];
           const totalInColumn = columnTotals?.[col.key] ?? cards.length;
+          const stats = columnStats[col.key] || { blocked: 0, maxDays: 0 };
+          const slaHours = kanbanRules?.sla_by_column?.[col.key];
+          const slaDays = slaHours ? Math.ceil(slaHours / 24) : 7;
           const wipExceeded = col.wip_limit != null && totalInColumn > col.wip_limit;
           const wipFull = col.wip_limit != null && totalInColumn >= col.wip_limit;
           const isOverTarget = overColumn === col.key;
+          const showAgingAlert = stats.maxDays >= slaDays;
 
           return (
             <div key={col.key} className={`kanban-column ${isOverTarget ? 'drag-over' : ''} ${wipExceeded ? 'wip-exceeded' : ''} ${wipFull ? 'wip-full' : ''}`}
@@ -460,14 +484,27 @@ export default function KanbanBoard({
                 <div className="column-title-row">
                   <i className={col.icon} style={{ color: col.color }}></i>
                   <span className="column-title">{col.title}</span>
-                  <span className="column-count" style={{ background: col.color }} title={columnTotals ? `${cards.length} cargadas de ${totalInColumn}` : undefined}>
-                    {columnTotals ? `${cards.length}/${totalInColumn}` : cards.length}
+                  <span className="column-count" style={{ background: col.color }} title={`${cards.length} visibles de ${totalInColumn} en total`}>
+                    {cards.length}
                   </span>
                 </div>
-                {col.wip_limit != null && (
-                  <div className={`wip-indicator ${wipExceeded ? 'exceeded' : ''} ${wipFull ? 'full' : ''}`}>
-                    WIP: {totalInColumn}/{col.wip_limit}
-                    {wipExceeded && <i className="fas fa-exclamation-triangle ms-1"></i>}
+                <div className="column-meta-row">
+                  <span className="column-showing">Mostrando {cards.length} de {totalInColumn}</span>
+                  {col.wip_limit != null && (
+                    <span className={`wip-indicator ${wipExceeded ? 'exceeded' : ''} ${wipFull ? 'full' : ''}`}>
+                      WIP {totalInColumn}/{col.wip_limit}
+                      {wipExceeded && <i className="fas fa-exclamation-triangle ms-1"></i>}
+                    </span>
+                  )}
+                </div>
+                {(stats.blocked > 0 || showAgingAlert) && (
+                  <div className="column-alerts">
+                    {stats.blocked > 0 && (
+                      <span className="column-alert column-alert-blocked"><i className="fas fa-lock"></i> {stats.blocked} bloqueada{stats.blocked > 1 ? 's' : ''}</span>
+                    )}
+                    {showAgingAlert && (
+                      <span className="column-alert column-alert-aging"><i className="fas fa-hourglass-half"></i> Hasta {stats.maxDays}d</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -487,6 +524,7 @@ export default function KanbanBoard({
                   onBlock={onBlock}
                   onUnblock={onUnblock}
                   disableDrag={isMobile}
+                  highlightedIds={highlightedSet}
                 />
               ) : (
                 <SortableContext items={cards.map(t => t.id)} strategy={verticalListSortingStrategy}>
@@ -534,7 +572,7 @@ export default function KanbanBoard({
         )}
       </DragOverlay>
 
-      <div className="kanban-column-dots">
+      <div className={`kanban-column-dots ${manyColumns ? 'kanban-column-dots-desktop' : ''}`}>
         {columnas.map((col, i) => (
           <button
             key={col.key}

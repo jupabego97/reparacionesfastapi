@@ -3,11 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem, KanbanColumn, HistorialEntry } from '../api/client';
 import { formatAuditAction, formatAuditDetails } from '../utils/auditLabels';
+import { formatRelativeTime } from '../utils/formatRelativeTime';
 import ConfirmModal from './ConfirmModal';
 
 interface Props {
   tarjetaId: number;
   onClose: () => void;
+  remoteEditRevision?: number;
 }
 
 type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'photos';
@@ -18,12 +20,15 @@ const PRIORIDADES = [
   { value: 'baja', label: 'Baja', color: '#22c55e' },
 ];
 
-export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
+export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevision = 0 }: Props) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('info');
   const [showDelete, setShowDelete] = useState(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [remoteConflictDismissed, setRemoteConflictDismissed] = useState(0);
   const [saving, setSaving] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
+  const showRemoteConflict = remoteEditRevision > remoteConflictDismissed;
 
   // Basic focus trap
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -167,6 +172,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
   });
 
   const handleSave = async () => {
+    if (showRemoteConflict) return;
     setSaving(true);
     await updateMut.mutateAsync({
       nombre_propietario: form.nombre_propietario,
@@ -208,14 +214,59 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
     reorderMediaMut.mutate(items);
   };
 
+  const isDirty = useMemo(() => {
+    if (!tarjeta) return false;
+    const tagIds = tarjeta.tags?.map(t => t.id).sort().join(',') || '';
+    const selected = [...selectedTags].sort().join(',');
+    return (
+      form.nombre_propietario !== (tarjeta.nombre_propietario || '')
+      || form.problema !== (tarjeta.problema || '')
+      || form.whatsapp !== (tarjeta.whatsapp || '')
+      || form.fecha_limite !== (tarjeta.fecha_limite || '')
+      || form.tiene_cargador !== (tarjeta.tiene_cargador || 'si')
+      || form.notas_tecnicas !== (tarjeta.notas_tecnicas || '')
+      || form.prioridad !== (tarjeta.prioridad || 'media')
+      || form.columna !== (tarjeta.columna || '')
+      || String(form.asignado_a ?? '') !== String(tarjeta.asignado_a ?? '')
+      || tagIds !== selected
+    );
+  }, [tarjeta, form, selectedTags]);
+
+  const requestClose = () => {
+    if (isDirty) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    onClose();
+  };
+
+  const reloadRemote = () => {
+    setRemoteConflictDismissed(remoteEditRevision);
+    void qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
+    void qc.invalidateQueries({ queryKey: ['subtasks', tarjetaId] });
+    void qc.invalidateQueries({ queryKey: ['comments', tarjetaId] });
+    void qc.invalidateQueries({ queryKey: ['historial', tarjetaId] });
+    void qc.invalidateQueries({ queryKey: ['media', tarjetaId] });
+  };
+
   return (
     <>
-      <div className="modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
-        <div className="modal-pro modal-lg" ref={modalRef} onClick={e => e.stopPropagation()}>
+      <div className="modal-overlay" onClick={requestClose} onKeyDown={handleKeyDown}>
+        <div className="modal-pro modal-lg" ref={modalRef} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="edit-tarjeta-title">
           <div className="modal-pro-header">
-            <h3><i className="fas fa-pen-fancy"></i> Editar Reparacion #{tarjetaId}</h3>
-            <button className="modal-close" onClick={onClose}><i className="fas fa-times"></i></button>
+            <h3 id="edit-tarjeta-title"><i className="fas fa-pen-fancy"></i> Editar Reparacion #{tarjetaId}</h3>
+            <button className="modal-close" onClick={requestClose} aria-label="Cerrar"><i className="fas fa-times"></i></button>
           </div>
+
+          {showRemoteConflict && (
+            <div className="remote-conflict-banner" role="alert">
+              <span><i className="fas fa-sync-alt"></i> Esta tarjeta cambió en otro equipo.</span>
+              <div className="remote-conflict-actions">
+                <button type="button" className="toolbar-btn" onClick={reloadRemote}>Recargar</button>
+                <button type="button" className="toolbar-btn" onClick={() => setRemoteConflictDismissed(remoteEditRevision)}>Conservar edición</button>
+              </div>
+            </div>
+          )}
 
           {loadingTarjeta || !tarjeta ? (
             <div className="modal-pro-body"><div className="app-loading"><div className="spinner-large"></div></div></div>
@@ -436,7 +487,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                               <div className="timeline-details">{formatAuditDetails(h.action, h.details)}</div>
                             )}
                             <div className="timeline-meta">
-                              <span><i className="fas fa-clock"></i> {h.changed_at?.slice(0, 16).replace('T', ' ')}</span>
+                              <span><i className="fas fa-clock"></i> {formatRelativeTime(h.changed_at)}</span>
                               {h.client_ip && <span><i className="fas fa-network-wired"></i> {h.client_ip}</span>}
                               {h.changed_by_name && <span><i className="fas fa-user"></i> {h.changed_by_name}</span>}
                             </div>
@@ -496,6 +547,16 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
           )}
         </div>
       </div>
+
+      {showDiscardConfirm && (
+        <ConfirmModal
+          title="Descartar cambios?"
+          message="Hay cambios sin guardar. Si cierra ahora, se perderán."
+          confirmLabel="Descartar"
+          onConfirm={() => { setShowDiscardConfirm(false); onClose(); }}
+          onCancel={() => setShowDiscardConfirm(false)}
+        />
+      )}
 
       {showDelete && (
         <ConfirmModal

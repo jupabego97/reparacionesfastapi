@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { api, type ActivityItem } from '../api/client';
 import { formatAuditAction } from '../utils/auditLabels';
+import { formatRelativeTime } from '../utils/formatRelativeTime';
+import { useAuth } from '../contexts/AuthContext';
 import { ErrorState, EmptyState } from './UiState';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -10,7 +12,14 @@ const STATUS_LABELS: Record<string, string> = {
     listos: 'Entregados',
 };
 
-export default function ActivityFeed({ onClose }: { onClose: () => void }) {
+interface Props {
+    onClose: () => void;
+    onSelectTarjeta?: (id: number) => void;
+}
+
+export default function ActivityFeed({ onClose, onSelectTarjeta }: Props) {
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -34,6 +43,13 @@ export default function ActivityFeed({ onClose }: { onClose: () => void }) {
         });
     };
 
+    const handleSelect = (item: ActivityItem) => {
+        if (item.tarjeta_id && onSelectTarjeta) {
+            onSelectTarjeta(item.tarjeta_id);
+            onClose();
+        }
+    };
+
     return (
         <div className="side-panel-overlay" onClick={onClose}>
             <div className="side-panel" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Actividad reciente">
@@ -51,7 +67,13 @@ export default function ActivityFeed({ onClose }: { onClose: () => void }) {
                     ) : (
                         <div className="activity-list">
                             {items.map(item => (
-                                <div key={item.id} className="activity-item">
+                                <button
+                                    type="button"
+                                    key={item.id}
+                                    className={`activity-item ${item.tarjeta_id ? 'activity-item-actionable' : ''}`}
+                                    onClick={() => handleSelect(item)}
+                                    disabled={!item.tarjeta_id || !onSelectTarjeta}
+                                >
                                     <div className="activity-icon">
                                         <i className="fas fa-arrow-right"></i>
                                     </div>
@@ -67,12 +89,12 @@ export default function ActivityFeed({ onClose }: { onClose: () => void }) {
                                             )}
                                         </div>
                                         <div className="activity-time">
-                                            {item.changed_at}
-                                            {item.client_ip ? ` · IP ${item.client_ip}` : ''}
+                                            {formatRelativeTime(item.changed_at)}
                                             {item.changed_by_name ? ` · ${item.changed_by_name}` : ''}
+                                            {isAdmin && item.client_ip ? ` · IP ${item.client_ip}` : ''}
                                         </div>
                                     </div>
-                                </div>
+                                </button>
                             ))}
                             {items.length < total && (
                                 <button className="btn-load-more" onClick={loadMore}>

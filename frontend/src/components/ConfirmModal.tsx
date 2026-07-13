@@ -3,9 +3,10 @@ interface Props {
   message: string;
   onConfirm: () => void;
   onCancel: () => void;
+  confirmLabel?: string;
 }
 
-export default function ConfirmModal({ title, message, onConfirm, onCancel }: Props) {
+export default function ConfirmModal({ title, message, onConfirm, onCancel, confirmLabel = 'Confirmar' }: Props) {
   return (
     <div className="confirm-overlay" onClick={onCancel}>
       <div className="confirm-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
@@ -13,7 +14,7 @@ export default function ConfirmModal({ title, message, onConfirm, onCancel }: Pr
         <p>{message}</p>
         <div className="confirm-actions">
           <button className="btn-cancel" onClick={onCancel}>Cancelar</button>
-          <button className="btn-delete" onClick={onConfirm}><i className="fas fa-check"></i> Confirmar</button>
+          <button className="btn-delete" onClick={onConfirm}><i className="fas fa-check"></i> {confirmLabel}</button>
         </div>
       </div>
     </div>

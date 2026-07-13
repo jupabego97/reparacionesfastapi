@@ -12,6 +12,13 @@ export const ACTION_LABELS: Record<string, string> = {
   tag_added: 'Etiqueta agregada',
 };
 
+export const STATUS_LABELS: Record<string, string> = {
+  ingresado: 'Ingresado',
+  diagnosticada: 'En diagnóstico',
+  para_entregar: 'Para entregar',
+  listos: 'Entregados',
+};
+
 export function formatAuditAction(action?: string | null): string {
   if (!action) return ACTION_LABELS.status_changed;
   return ACTION_LABELS[action] || action;

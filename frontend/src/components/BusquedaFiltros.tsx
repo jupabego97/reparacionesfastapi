@@ -23,6 +23,14 @@ interface Props {
 
 const EMPTY_FILTROS: Filtros = { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '', orden_por: '', orden_dir: '' };
 
+const PRIORITY_LABELS: Record<string, string> = { alta: 'Alta', media: 'Media', baja: 'Baja' };
+const ORDEN_LABELS: Record<string, string> = {
+  fecha_ingreso: 'Ingreso',
+  prioridad: 'Prioridad',
+  nombre_cliente: 'Cliente',
+  fecha_limite: 'Limite',
+};
+
 export default function BusquedaFiltros({ filtros, onChange, totalResults, users, tags, columnas }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const set = (key: keyof Filtros, val: string) => onChange({ ...filtros, [key]: val });
@@ -30,6 +38,15 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
   const activeFilterCount = [filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag, filtros.orden_por].filter(Boolean).length;
 
   const toggleOrdenDir = () => set('orden_dir', filtros.orden_dir === 'desc' ? 'asc' : 'desc');
+
+  const chips: { key: keyof Filtros; label: string }[] = [];
+  if (filtros.search) chips.push({ key: 'search', label: `Busqueda: ${filtros.search}` });
+  if (filtros.estado) chips.push({ key: 'estado', label: columnas.find(c => c.key === filtros.estado)?.title || filtros.estado });
+  if (filtros.prioridad) chips.push({ key: 'prioridad', label: PRIORITY_LABELS[filtros.prioridad] || filtros.prioridad });
+  if (filtros.asignado_a) chips.push({ key: 'asignado_a', label: users.find(u => String(u.id) === filtros.asignado_a)?.full_name || 'Tecnico' });
+  if (filtros.cargador) chips.push({ key: 'cargador', label: filtros.cargador === 'si' ? 'Con cargador' : 'Sin cargador' });
+  if (filtros.tag) chips.push({ key: 'tag', label: tags.find(t => String(t.id) === filtros.tag)?.name || 'Etiqueta' });
+  if (filtros.orden_por) chips.push({ key: 'orden_por', label: `Orden: ${ORDEN_LABELS[filtros.orden_por] || filtros.orden_por}` });
 
   return (
     <div className="filtros-bar">
@@ -134,6 +151,21 @@ export default function BusquedaFiltros({ filtros, onChange, totalResults, users
       {(hasFilters || totalResults !== undefined) && (
         <div className="filtros-info">
           {totalResults !== undefined && <span className="results-count">{totalResults} resultados</span>}
+          {chips.length > 0 && (
+            <div className="filter-chips" aria-label="Filtros activos">
+              {chips.map(chip => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  className="filter-chip"
+                  onClick={() => set(chip.key, '')}
+                  aria-label={`Quitar filtro ${chip.label}`}
+                >
+                  {chip.label} <i className="fas fa-times"></i>
+                </button>
+              ))}
+            </div>
+          )}
           {hasFilters && (
             <button className="clear-all-btn" onClick={() => onChange(EMPTY_FILTROS)}>
               <i className="fas fa-times-circle"></i> Limpiar filtros

@@ -1626,6 +1626,13 @@ async def upload_tarjeta_media(
         next_pos += 1
     db.commit()
     invalidate_stats()
+
+    db.refresh(t)
+    result = _serialize_board_items([t], db, include_image=True)[0]
+    try:
+        await sio.emit("tarjeta_actualizada", {"event_version": 1, "data": result})
+    except Exception:
+        pass
     return created
 
 

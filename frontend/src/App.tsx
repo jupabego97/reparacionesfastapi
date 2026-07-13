@@ -1,6 +1,5 @@
 import { useState, useEffect, lazy, Suspense, useCallback, useRef, useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InfiniteData } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
 import { api } from './api/client';
 import type { TarjetaBoardItem, KanbanColumn, Tag, UserInfo, TarjetasBoardResponse, TarjetaUpdate, UserPreferences, SavedView } from './api/client';
@@ -18,7 +17,20 @@ import { EmptyState, ErrorState } from './components/UiState';
 import { useDebounce } from './hooks/useDebounce';
 import { useIsMobile } from './hooks/useIsMobile';
 import { API_BASE } from './api/client';
-import { cardMatchesBoardFilters } from './utils/boardMoves';
+import {
+  applyActivityPatch,
+  applyCardPatch,
+  applyReorderPatch,
+  removeCardPatch,
+  type BoardInfiniteData,
+  type ReorderItem,
+} from './utils/boardCache';
+import {
+  cardMatchesOperationalView,
+  filtersForOperationalView,
+  OPERATIONAL_VIEWS,
+  type OperationalViewId,
+} from './utils/operationalViews';
 
 const NuevaTarjetaModal = lazy(() => import('./components/NuevaTarjetaModal'));
 const EditarTarjetaModal = lazy(() => import('./components/EditarTarjetaModal'));
@@ -29,9 +41,7 @@ type ThemeMode = 'light' | 'dark';
 type ViewMode = 'kanban' | 'calendar';
 type ToastType = 'success' | 'warning' | 'info' | 'error';
 type BoardPageParam = string | number | undefined;
-type BoardInfiniteData = InfiniteData<TarjetasBoardResponse, BoardPageParam>;
 
-type ReorderItem = { id: number; columna: string; posicion: number };
 type SocketEnvelope<T> = { event_version?: number; data?: T } | T;
 
 function PwaUpdateBanner({ onUpdate }: { onUpdate: () => void }) {
@@ -56,9 +66,13 @@ function unwrapSocketData<T>(payload: SocketEnvelope<T>): T {
 
 const DEFAULT_FILTROS = { search: '', estado: '', prioridad: '', asignado_a: '', cargador: '', tag: '', orden_por: '', orden_dir: '' };
 
-function loadFilters() {
+function filtersStorageKey(userId?: number | null) {
+  return userId ? `kanban-filters-${userId}` : 'kanban-filters';
+}
+
+function loadFilters(userId?: number | null) {
   try {
-    const saved = localStorage.getItem('kanban-filters');
+    const saved = localStorage.getItem(filtersStorageKey(userId));
     return saved ? { ...DEFAULT_FILTROS, ...JSON.parse(saved) } : DEFAULT_FILTROS;
   } catch {
     return DEFAULT_FILTROS;
@@ -72,59 +86,6 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   theme: 'dark',
   mobile_behavior: 'horizontal_swipe',
 };
-
-function applyCardPatch(data: BoardInfiniteData | undefined, card: TarjetaBoardItem): BoardInfiniteData | undefined {
-  if (!data) return data;
-  let found = false;
-  const nextPages = data.pages.map(page => {
-    const idx = page.tarjetas.findIndex(t => t.id === card.id);
-    if (idx === -1) return page;
-    found = true;
-    const nextTarjetas = [...page.tarjetas];
-    nextTarjetas[idx] = { ...nextTarjetas[idx], ...card };
-    return { ...page, tarjetas: nextTarjetas };
-  });
-  if (!found && nextPages.length > 0) {
-    const first = nextPages[0];
-    nextPages[0] = { ...first, tarjetas: [card, ...first.tarjetas] };
-  }
-  return { ...data, pages: nextPages };
-}
-
-function removeCardPatch(data: BoardInfiniteData | undefined, id: number): BoardInfiniteData | undefined {
-  if (!data) return data;
-  return {
-    ...data,
-    pages: data.pages.map(page => ({
-      ...page,
-      tarjetas: page.tarjetas.filter(t => t.id !== id),
-    })),
-  };
-}
-
-function applyReorderPatch(
-  data: BoardInfiniteData | undefined,
-  items: ReorderItem[],
-  filters?: typeof DEFAULT_FILTROS,
-): BoardInfiniteData | undefined {
-  if (!data || !items.length) return data;
-  const byId = new Map(items.map(i => [i.id, i]));
-  return {
-    ...data,
-    pages: data.pages.map(page => ({
-      ...page,
-      tarjetas: page.tarjetas
-        .map(t => {
-          const upd = byId.get(t.id);
-          if (!upd) return t;
-          const next = { ...t, columna: upd.columna, posicion: upd.posicion };
-          if (filters && !cardMatchesBoardFilters(next, filters)) return null;
-          return next;
-        })
-        .filter((t): t is TarjetaBoardItem => t !== null),
-    })),
-  };
-}
 
 async function fetchBoardCards(params: {
   cursor?: string;
@@ -191,12 +152,31 @@ export default function App() {
   const [showActivity, setShowActivity] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
+  const [operationalView, setOperationalView] = useState<OperationalViewId>('all');
+  const [remoteEditRevision, setRemoteEditRevision] = useState(0);
+  const [highlightCardIds, setHighlightCardIds] = useState<number[]>([]);
+  const boardFiltersRef = useRef(DEFAULT_FILTROS);
+  const editCardIdRef = useRef<number | null>(null);
 
-  const [filtros, setFiltros] = useState(loadFilters);
+  const [filtros, setFiltros] = useState(DEFAULT_FILTROS);
   const debouncedSearch = useDebounce(filtros.search, 300);
+
   useEffect(() => {
-    localStorage.setItem('kanban-filters', JSON.stringify(filtros));
-  }, [filtros]);
+    if (user?.id) {
+      setFiltros(loadFilters(user.id));
+    }
+  }, [user?.id]);
+
+
+  useEffect(() => {
+    editCardIdRef.current = editCardId;
+  }, [editCardId]);
+
+  useEffect(() => {
+    if (user?.id) {
+      localStorage.setItem(filtersStorageKey(user.id), JSON.stringify(filtros));
+    }
+  }, [filtros, user?.id]);
 
   const [groupBy, setGroupBy] = useState<string>('none');
   const [compactView, setCompactView] = useState(false);
@@ -279,6 +259,11 @@ export default function App() {
     return merged;
   }, [boardData]);
 
+  const displayTarjetas = useMemo(() => {
+    if (operationalView === 'all') return tarjetas;
+    return tarjetas.filter(t => cardMatchesOperationalView(t, operationalView));
+  }, [tarjetas, operationalView]);
+
   useEffect(() => {
     if (!isAuthenticated || !hasNextPage || isFetchingNextPage) return;
     const delayMs = (boardData?.pages?.length ?? 0) <= 1 ? 250 : 150;
@@ -348,17 +333,30 @@ export default function App() {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // Resetear a pantalla de inicio al volver de background (solo móvil)
+  // Resetear a pantalla de inicio al volver de background (solo móvil, sin modal abierto)
   useEffect(() => {
     if (!isMobile) return;
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !showNew && editCardId == null) {
         setMobileHome(true);
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [isMobile]);
+  }, [isMobile, showNew, editCardId]);
+
+  const applyOperationalView = useCallback((viewId: OperationalViewId) => {
+    setOperationalView(viewId);
+    const partial = filtersForOperationalView(viewId, user);
+    setFiltros(prev => ({ ...DEFAULT_FILTROS, ...partial, search: viewId === 'all' ? prev.search : '' }));
+  }, [user]);
+
+  const pulseCard = useCallback((id: number) => {
+    setHighlightCardIds(prev => [...prev.filter(x => x !== id), id]);
+    window.setTimeout(() => {
+      setHighlightCardIds(prev => prev.filter(x => x !== id));
+    }, 2500);
+  }, []);
 
   const saveCurrentView = useCallback(() => {
     const nextIndex = (preferences.saved_views?.length || 0) + 1;
@@ -385,8 +383,13 @@ export default function App() {
 
   const applySavedView = useCallback((viewId: string) => {
     setActiveSavedViewId(viewId);
+    if (!viewId) {
+      setOperationalView('all');
+      return;
+    }
     const selected = preferences.saved_views.find(v => v.id === viewId);
     if (!selected) return;
+    setOperationalView('all');
     setFiltros({ ...DEFAULT_FILTROS, ...selected.filtros });
     setGroupBy(selected.groupBy);
     setCompactView(selected.compactView);
@@ -413,8 +416,8 @@ export default function App() {
     reorderBufferRef.current = [];
     reorderTimerRef.current = null;
     if (!items.length) return;
-    qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyReorderPatch(old, items, filtros));
-  }, [qc, filtros]);
+    qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyReorderPatch(old, items, boardFiltersRef.current));
+  }, [qc]);
 
   const columnTotals = useMemo(() => {
     if (!boardData?.pages?.length) return undefined;
@@ -425,11 +428,30 @@ export default function App() {
   }, [boardData]);
 
   const totalFilteredResults = useMemo(() => {
+    if (operationalView !== 'all') return displayTarjetas.length;
     if (columnTotals) {
       return Object.values(columnTotals).reduce((sum, n) => sum + n, 0);
     }
     return tarjetas.length;
-  }, [columnTotals, tarjetas.length]);
+  }, [operationalView, displayTarjetas.length, columnTotals, tarjetas.length]);
+
+  const activeBoardFilters = useMemo(() => ({
+    search: debouncedSearch,
+    estado: filtros.estado,
+    prioridad: filtros.prioridad,
+    asignado_a: filtros.asignado_a,
+    cargador: filtros.cargador,
+    tag: filtros.tag,
+  }), [debouncedSearch, filtros.estado, filtros.prioridad, filtros.asignado_a, filtros.cargador, filtros.tag]);
+
+  useEffect(() => {
+    boardFiltersRef.current = { ...filtros, search: debouncedSearch };
+  }, [filtros, debouncedSearch]);
+
+  const displayColumnas = useMemo(
+    () => columnas.map(c => (c.key === 'listos' ? { ...c, title: 'Entregados' } : c)),
+    [columnas],
+  );
 
   const { data: kanbanRules } = useQuery({
     queryKey: ['kanban-rules'],
@@ -458,14 +480,23 @@ export default function App() {
     s.on('tarjeta_creada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
       const card = unwrapSocketData(payload);
       if (!card?.id) return;
-      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
+      const filters = boardFiltersRef.current;
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card, filters));
+      pulseCard(card.id);
+      setToast({ msg: `Nueva reparación: ${card.nombre_propietario || 'Cliente'}`, type: 'info' });
       qc.invalidateQueries({ queryKey: ['notificaciones'] });
     });
 
     s.on('tarjeta_actualizada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
       const card = unwrapSocketData(payload);
       if (!card?.id) return;
-      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card));
+      const filters = boardFiltersRef.current;
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card, filters));
+      if (editCardIdRef.current === card.id) {
+        setRemoteEditRevision(v => v + 1);
+      } else {
+        pulseCard(card.id);
+      }
       qc.invalidateQueries({ queryKey: ['notificaciones'] });
     });
 
@@ -490,9 +521,12 @@ export default function App() {
     s.on('tarjeta_activity', (payload: SocketEnvelope<{ tarjeta_id?: number; kind?: string }>) => {
       const data = unwrapSocketData(payload);
       if (!data?.tarjeta_id) return;
-      void qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
-      if (editCardId === data.tarjeta_id) {
-        void qc.invalidateQueries({ queryKey: ['tarjeta', data.tarjeta_id] });
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old =>
+        applyActivityPatch(old, data.tarjeta_id!, data.kind || 'activity'),
+      );
+      if (editCardIdRef.current === data.tarjeta_id) {
+        setRemoteEditRevision(v => v + 1);
+        void qc.invalidateQueries({ queryKey: ['tarjeta-detail', data.tarjeta_id] });
       }
     });
 
@@ -503,13 +537,14 @@ export default function App() {
       }
       s.disconnect();
     };
-  }, [isAuthenticated, token, qc, flushReorderBuffer, editCardId]);
+  }, [isAuthenticated, token, qc, flushReorderBuffer, pulseCard]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setShowNew(true); }
       else if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setShowStats(true); }
       else if (e.key === 'x' || e.key === 'X') { e.preventDefault(); setShowExport(true); }
+      else if (e.key === 'a' || e.key === 'A') { e.preventDefault(); setShowActivity(true); }
       else if (e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('.search-box input')?.focus(); }
       else if (e.key === 'Escape') {
         setShowNew(false);
@@ -521,6 +556,20 @@ export default function App() {
           setSelectMode(false);
           setSelectedIds([]);
         }
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const focused = document.activeElement as HTMLElement | null;
+        if (!focused?.classList.contains('tarjeta-card')) return;
+        const cards = Array.from(document.querySelectorAll<HTMLElement>('.tarjeta-card'));
+        const idx = cards.indexOf(focused);
+        if (idx === -1) return;
+        const next = e.key === 'ArrowRight' ? cards[idx + 1] : cards[idx - 1];
+        if (next) {
+          e.preventDefault();
+          next.focus();
+        }
+      } else if (e.key === 'Enter' && document.activeElement?.classList.contains('tarjeta-card')) {
+        e.preventDefault();
+        (document.activeElement as HTMLElement).click();
       }
     };
     window.addEventListener('keydown', handler);
@@ -534,7 +583,7 @@ export default function App() {
   const handleBlock = useCallback(async (id: number, reason: string) => {
     try {
       const updated = await api.blockTarjeta(id, reason);
-      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated, boardFiltersRef.current));
       setToast({ msg: 'Tarjeta bloqueada', type: 'info' });
     } catch {
       setToast({ msg: 'Error al bloquear', type: 'error' });
@@ -544,7 +593,7 @@ export default function App() {
   const handleUnblock = useCallback(async (id: number) => {
     try {
       const updated = await api.unblockTarjeta(id);
-      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated));
+      qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated, boardFiltersRef.current));
       setToast({ msg: 'Tarjeta desbloqueada', type: 'success' });
     } catch {
       setToast({ msg: 'Error al desbloquear', type: 'error' });
@@ -646,7 +695,7 @@ export default function App() {
             <i className="fas fa-plus"></i> <span className="btn-text">Nueva</span>
           </button>
 
-          <NotificationCenter />
+          <NotificationCenter onOpenTarjeta={id => setEditCardId(id)} />
 
           <button className="header-btn" onClick={toggleTheme} title="Cambiar tema" aria-label="Cambiar tema">
             <i className={theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon'}></i>
@@ -702,7 +751,7 @@ export default function App() {
               <i className="fas fa-calendar-alt"></i> Calendario
             </button>
           </div>
-          <span className="shortcuts-hint toolbar-secondary" title="N = Nueva | E = Estadisticas | X = Exportar | / = Buscar | Esc = Cerrar">
+          <span className="shortcuts-hint toolbar-secondary" title="N = Nueva | E = Estadisticas | X = Exportar | A = Actividad | / = Buscar | ←/→ = Tarjetas | Esc = Cerrar">
             <i className="fas fa-keyboard"></i> Atajos
           </span>
           <select
@@ -749,8 +798,24 @@ export default function App() {
         </div>
       </div>
 
-      <BusquedaFiltros filtros={filtros} onChange={setFiltros} totalResults={totalFilteredResults} users={users} tags={allTags}
-        columnas={columnas.map(c => ({ key: c.key, title: c.title }))} />
+      {viewMode === 'kanban' && (
+        <div className="operational-views-bar" role="toolbar" aria-label="Vistas operativas">
+          {OPERATIONAL_VIEWS.map(view => (
+            <button
+              key={view.id}
+              type="button"
+              className={`operational-view-btn ${operationalView === view.id ? 'active' : ''}`}
+              onClick={() => applyOperationalView(view.id)}
+              aria-pressed={operationalView === view.id}
+            >
+              <i className={view.icon}></i> {view.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <BusquedaFiltros filtros={filtros} onChange={f => { setOperationalView('all'); setFiltros(f); }} totalResults={totalFilteredResults} users={users} tags={allTags}
+        columnas={displayColumnas.map(c => ({ key: c.key, title: c.title }))} />
 
       {isFetchingNextPage && (
         <div className="board-loading-banner" role="status" aria-live="polite">
@@ -777,18 +842,21 @@ export default function App() {
               actionLabel="Reintentar"
               onAction={() => refetchBoard()}
             />
-          ) : tarjetas.length === 0 ? (
+          ) : displayTarjetas.length === 0 ? (
             <EmptyState
               title="No hay tarjetas para mostrar"
-              message={Object.values(filtros).some(Boolean) ? 'Pruebe limpiar o ajustar filtros.' : 'Cree su primera tarjeta para comenzar.'}
-              actionLabel={Object.values(filtros).some(Boolean) ? 'Limpiar filtros' : 'Nueva tarjeta'}
-              onAction={() => Object.values(filtros).some(Boolean) ? setFiltros(DEFAULT_FILTROS) : setShowNew(true)}
+              message={operationalView !== 'all'
+                ? 'Ninguna tarjeta coincide con esta vista operativa.'
+                : Object.values(filtros).some(Boolean) ? 'Pruebe limpiar o ajustar filtros.' : 'Cree su primera tarjeta para comenzar.'}
+              actionLabel={operationalView !== 'all' ? 'Ver todas' : Object.values(filtros).some(Boolean) ? 'Limpiar filtros' : 'Nueva tarjeta'}
+              onAction={() => operationalView !== 'all' ? applyOperationalView('all') : Object.values(filtros).some(Boolean) ? setFiltros(DEFAULT_FILTROS) : setShowNew(true)}
             />
           ) : (
-            <KanbanBoard columnas={columnas} tarjetas={tarjetas}
-              boardFilters={filtros}
+            <KanbanBoard columnas={displayColumnas} tarjetas={displayTarjetas}
+              boardFilters={activeBoardFilters}
               columnTotals={columnTotals}
               kanbanRules={kanbanRules}
+              highlightCardIds={highlightCardIds}
               isFetchingMore={isFetchingNextPage}
               onEdit={t => setEditCardId(t.id)} groupBy={groupBy} compactView={compactView}
               selectable={selectMode} selectedIds={selectedIds} onSelect={toggleSelect}
@@ -804,21 +872,21 @@ export default function App() {
               }}
               onMoveBlocked={(msg) => setToast({ msg, type: 'warning' })}
               onMoveSuccess={(cardId, oldCol, newCol) => {
-                const colTitle = columnas.find(c => c.key === newCol)?.title || newCol;
+                const colTitle = displayColumnas.find(c => c.key === newCol)?.title || newCol;
                 setToast({ msg: `Tarjeta movida a ${colTitle}`, type: 'success' });
                 setUndoAction({ cardId, oldCol, msg: `Movida a ${colTitle}` });
               }} />
           )}
         </>
       ) : (
-        <CalendarView tarjetas={tarjetas} onSelect={t => setEditCardId(t.id)} />
+        <CalendarView tarjetas={displayTarjetas} onSelect={t => setEditCardId(t.id)} />
       )}
       </div>
 
       {selectMode && selectedIds.length > 0 && (
         <BulkActionsBar
           selectedIds={selectedIds}
-          columns={columnas}
+          columns={displayColumnas}
           onClear={() => setSelectedIds([])}
           onDone={() => {
             setSelectedIds([]);
@@ -835,7 +903,12 @@ export default function App() {
         </div>
       )}
 
-      {showActivity && <ActivityFeed onClose={() => setShowActivity(false)} />}
+      {showActivity && (
+        <ActivityFeed
+          onClose={() => setShowActivity(false)}
+          onSelectTarjeta={id => setEditCardId(id)}
+        />
+      )}
 
       <button className="mobile-fab-new" onClick={() => setShowNew(true)} title="Nueva reparacion" aria-label="Crear nueva reparacion">
         <i className="fas fa-plus"></i>
@@ -852,7 +925,13 @@ export default function App() {
             }}
           />
         )}
-        {editCardId != null && <EditarTarjetaModal tarjetaId={editCardId} onClose={() => setEditCardId(null)} />}
+        {editCardId != null && (
+          <EditarTarjetaModal
+            tarjetaId={editCardId}
+            remoteEditRevision={remoteEditRevision}
+            onClose={() => setEditCardId(null)}
+          />
+        )}
         {showStats && <EstadisticasModal onClose={() => setShowStats(false)} />}
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
       </Suspense>

@@ -2,15 +2,20 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { NotificationItem } from '../api/client';
+import { formatRelativeTime } from '../utils/formatRelativeTime';
 
-export default function NotificationCenter() {
+interface Props {
+    onOpenTarjeta?: (id: number) => void;
+}
+
+export default function NotificationCenter({ onOpenTarjeta }: Props) {
     const qc = useQueryClient();
     const [open, setOpen] = useState(false);
 
     const { data } = useQuery({
         queryKey: ['notificaciones'],
         queryFn: () => api.getNotificaciones(),
-        refetchInterval: 60_000, // 60s — socket events trigger invalidation for real-time
+        refetchInterval: 60_000,
         staleTime: 30_000,
     });
 
@@ -32,12 +37,28 @@ export default function NotificationCenter() {
         success: 'fas fa-check-circle',
         warning: 'fas fa-exclamation-triangle',
         error: 'fas fa-times-circle',
+        nueva: 'fas fa-inbox',
+        bloqueada: 'fas fa-lock',
+        entrega: 'fas fa-box-open',
+        vencida: 'fas fa-calendar-times',
     };
     const typeColors: Record<string, string> = {
         info: '#3b82f6',
         success: '#22c55e',
         warning: '#f59e0b',
         error: '#ef4444',
+        nueva: '#0ea5e9',
+        bloqueada: '#ef4444',
+        entrega: '#8b5cf6',
+        vencida: '#f97316',
+    };
+
+    const handleClick = (n: NotificationItem) => {
+        if (!n.read) markReadMut.mutate([n.id]);
+        if (n.tarjeta_id && onOpenTarjeta) {
+            onOpenTarjeta(n.tarjeta_id);
+            setOpen(false);
+        }
     };
 
     return (
@@ -70,15 +91,19 @@ export default function NotificationCenter() {
                                 <p className="empty-notif"><i className="fas fa-bell-slash"></i> Sin notificaciones</p>
                             ) : (
                                 notifications.map((n: NotificationItem) => (
-                                    <div key={n.id} className={`notification-item ${n.read ? 'read' : 'unread'}`}
-                                        onClick={() => !n.read && markReadMut.mutate([n.id])}>
-                                        <i className={typeIcons[n.type] || 'fas fa-info-circle'} style={{ color: typeColors[n.type] }}></i>
+                                    <button
+                                        type="button"
+                                        key={n.id}
+                                        className={`notification-item ${n.read ? 'read' : 'unread'} ${n.tarjeta_id ? 'notification-actionable' : ''}`}
+                                        onClick={() => handleClick(n)}
+                                    >
+                                        <i className={typeIcons[n.severity || n.type] || typeIcons[n.type] || 'fas fa-info-circle'} style={{ color: typeColors[n.severity || n.type] || typeColors[n.type] || '#3b82f6' }}></i>
                                         <div className="notif-content">
                                             <strong>{n.title}</strong>
                                             <p>{n.message}</p>
-                                            <small>{n.created_at?.slice(0, 16).replace('T', ' ')}</small>
+                                            <small>{formatRelativeTime(n.created_at)}</small>
                                         </div>
-                                    </div>
+                                    </button>
                                 ))
                             )}
                         </div>

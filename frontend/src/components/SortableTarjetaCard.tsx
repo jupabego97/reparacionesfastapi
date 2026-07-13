@@ -18,11 +18,12 @@ interface Props {
   onUnblock?: (id: number) => void;
   /** En móvil no mostramos el handle de arrastre; se usan los botones de flecha */
   disableDrag?: boolean;
+  highlighted?: boolean;
 }
 
 const noLayoutAnimation = () => false;
 
-function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock, disableDrag }: Props) {
+function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onMove, compact, selectable, selected, onSelect, onBlock, onUnblock, disableDrag, highlighted }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isSorting } = useSortable({
     id: tarjeta.id,
     disabled: disableDrag || !!tarjeta.bloqueada,
@@ -42,7 +43,7 @@ function SortableTarjetaCardComponent({ tarjeta, columnas, onEdit, onDelete, onM
         onEdit={onEdit} onDelete={onDelete} onMove={onMove} compact={compact}
         selectable={selectable} selected={selected} onSelect={onSelect}
         onBlock={onBlock} onUnblock={onUnblock}
-        dragHandleProps={disableDrag ? undefined : listeners} isDragging={isDragging} />
+        dragHandleProps={disableDrag ? undefined : listeners} isDragging={isDragging} highlighted={highlighted} />
     </div>
   );
 }
