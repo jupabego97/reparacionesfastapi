@@ -1833,6 +1833,17 @@ body {
   color: var(--accent);
 }
 
+.timeline-action {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.timeline-details {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+}
+
 .timeline-meta {
   display: flex;
   gap: 1rem;

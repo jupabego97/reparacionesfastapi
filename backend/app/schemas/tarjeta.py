@@ -80,11 +80,14 @@ class TarjetaResponse(BaseModel):
 class HistorialEntry(BaseModel):
     id: int
     tarjeta_id: int
+    action: str = "status_changed"
     old_status: str | None = None
     new_status: str
     changed_at: str | None = None
     changed_by: int | None = None
     changed_by_name: str | None = None
+    client_ip: str | None = None
+    details: str | None = None
 
 
 # --- Batch position update para drag & drop ---

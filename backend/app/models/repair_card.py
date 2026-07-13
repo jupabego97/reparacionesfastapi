@@ -94,21 +94,27 @@ class StatusHistory(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     tarjeta_id = Column(Integer, ForeignKey("repair_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(Text, nullable=False, default="status_changed", index=True)
     old_status = Column(Text, nullable=True)
     new_status = Column(Text, nullable=False)
     changed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC), index=True)
     changed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     changed_by_name = Column(Text, nullable=True)
+    client_ip = Column(Text, nullable=True)
+    details = Column(Text, nullable=True)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "tarjeta_id": self.tarjeta_id,
+            "action": self.action or "status_changed",
             "old_status": self.old_status,
             "new_status": self.new_status,
             "changed_at": self.changed_at.strftime("%Y-%m-%d %H:%M:%S") if self.changed_at else None,
             "changed_by": self.changed_by,
             "changed_by_name": self.changed_by_name,
+            "client_ip": self.client_ip,
+            "details": self.details,
         }
 
 

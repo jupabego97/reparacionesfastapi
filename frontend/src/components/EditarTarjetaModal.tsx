@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem, KanbanColumn } from '../api/client';
+import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem, KanbanColumn, HistorialEntry } from '../api/client';
+import { formatAuditAction, formatAuditDetails } from '../utils/auditLabels';
 import ConfirmModal from './ConfirmModal';
 
 interface Props {
@@ -10,13 +11,6 @@ interface Props {
 }
 
 type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'photos';
-type HistorialEntry = {
-  id: number;
-  old_status: string | null;
-  new_status: string;
-  changed_at: string | null;
-  changed_by_name: string | null;
-};
 
 const PRIORIDADES = [
   { value: 'alta', label: 'Alta', color: '#ef4444' },
@@ -429,18 +423,27 @@ export default function EditarTarjetaModal({ tarjetaId, onClose }: Props) {
                           <div className="timeline-dot"></div>
                           <div className="timeline-content">
                             <div className="timeline-row">
-                              <span className="timeline-from">{colTitleMap[h.old_status || ''] || h.old_status || '-'}</span>
-                              <i className="fas fa-arrow-right"></i>
-                              <span className="timeline-to">{colTitleMap[h.new_status] || h.new_status}</span>
+                              <span className="timeline-action">{formatAuditAction(h.action)}</span>
+                              {h.action === 'status_changed' && (
+                                <>
+                                  <span className="timeline-from">{colTitleMap[h.old_status || ''] || h.old_status || '-'}</span>
+                                  <i className="fas fa-arrow-right"></i>
+                                  <span className="timeline-to">{colTitleMap[h.new_status] || h.new_status}</span>
+                                </>
+                              )}
                             </div>
+                            {formatAuditDetails(h.action, h.details) && (
+                              <div className="timeline-details">{formatAuditDetails(h.action, h.details)}</div>
+                            )}
                             <div className="timeline-meta">
                               <span><i className="fas fa-clock"></i> {h.changed_at?.slice(0, 16).replace('T', ' ')}</span>
+                              {h.client_ip && <span><i className="fas fa-network-wired"></i> {h.client_ip}</span>}
                               {h.changed_by_name && <span><i className="fas fa-user"></i> {h.changed_by_name}</span>}
                             </div>
                           </div>
                         </div>
                       ))}
-                      {historial.length === 0 && <p className="empty-msg">Sin cambios de estado registrados</p>}
+                      {historial.length === 0 && <p className="empty-msg">Sin eventos registrados</p>}
                     </div>
                   </div>
                 )}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, type ActivityItem } from '../api/client';
+import { formatAuditAction } from '../utils/auditLabels';
 import { ErrorState, EmptyState } from './UiState';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -56,16 +57,20 @@ export default function ActivityFeed({ onClose }: { onClose: () => void }) {
                                     </div>
                                     <div className="activity-content">
                                         <div className="activity-text">
-                                            <strong>{item.changed_by_name || 'Sistema'}</strong> movio{' '}
+                                            <strong>{formatAuditAction(item.action)}</strong>{' '}
                                             <span className="activity-card-name">{item.nombre_propietario}</span>
-                                            {item.old_status && (
+                                            {item.action === 'status_changed' && item.old_status && (
                                                 <>
                                                     {' '}de <span className="activity-status">{STATUS_LABELS[item.old_status] || item.old_status}</span>
+                                                    {' '}a <span className="activity-status highlight">{STATUS_LABELS[item.new_status] || item.new_status}</span>
                                                 </>
                                             )}
-                                            {' '}a <span className="activity-status highlight">{STATUS_LABELS[item.new_status] || item.new_status}</span>
                                         </div>
-                                        <div className="activity-time">{item.changed_at}</div>
+                                        <div className="activity-time">
+                                            {item.changed_at}
+                                            {item.client_ip ? ` · IP ${item.client_ip}` : ''}
+                                            {item.changed_by_name ? ` · ${item.changed_by_name}` : ''}
+                                        </div>
                                     </div>
                                 </div>
                             ))}

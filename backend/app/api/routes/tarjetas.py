@@ -29,6 +29,21 @@ from app.schemas.tarjeta import (
     TarjetaCreate,
     TarjetaUpdate,
 )
+from app.services.audit_service import (
+    ACTION_ASSIGNED,
+    ACTION_BLOCKED,
+    ACTION_CREATED,
+    ACTION_DELETED,
+    ACTION_PRIORITY_CHANGED,
+    ACTION_REORDERED,
+    ACTION_RESTORED,
+    ACTION_STATUS_CHANGED,
+    ACTION_TAG_ADDED,
+    ACTION_UNBLOCKED,
+    ACTION_UPDATED,
+    get_client_ip,
+    record_card_audit,
+)
 from app.services.auth_service import get_current_user, get_current_user_optional, require_role
 from app.services.notification_service import notificar_cambio_estado
 from app.services.storage_service import get_storage_service
@@ -166,6 +181,7 @@ def _move_card_status(
     user: User | None,
     *,
     notify: bool = True,
+    client_ip: str | None = None,
 ) -> str | None:
     """Aplica cambio de columna con reglas Kanban. Retorna old_status si hubo cambio."""
     _ensure_not_blocked(card)
@@ -181,14 +197,15 @@ def _move_card_status(
     _check_required_fields_for_column(db, card, new_status)
     _check_wip_limit(db, new_status, exclude_card_id=card.id)
 
-    db.add(StatusHistory(
+    record_card_audit(
+        db,
         tarjeta_id=card.id,
+        action=ACTION_STATUS_CHANGED,
         old_status=old_status,
         new_status=new_status,
-        changed_at=datetime.now(UTC),
-        changed_by=user.id if user else None,
-        changed_by_name=user.full_name if user else None,
-    ))
+        client_ip=client_ip,
+        user=user,
+    )
     if notify:
         notificar_cambio_estado(db, card, old_status, new_status)
 
@@ -970,6 +987,18 @@ async def create_tarjeta(
         ))
         db.commit()
 
+    client_ip = get_client_ip(request)
+    record_card_audit(
+        db,
+        tarjeta_id=t.id,
+        action=ACTION_CREATED,
+        old_status=None,
+        new_status=t.status,
+        client_ip=client_ip,
+        user=user,
+    )
+    db.commit()
+
     invalidate_stats()
 
     result = _enrich_tarjeta(t, db)
@@ -984,6 +1013,7 @@ async def create_tarjeta(
 @router.put("/{id}")
 async def update_tarjeta(
     id: int,
+    request: Request,
     data: TarjetaUpdate,
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user_optional),
@@ -992,7 +1022,9 @@ async def update_tarjeta(
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
+    client_ip = get_client_ip(request)
     upd = data.model_dump(exclude_unset=True)
+    changed_fields = [k for k in upd if k != "columna"]
     if "nombre_propietario" in upd:
         t.owner_name = upd["nombre_propietario"]
     if "problema" in upd:
@@ -1041,7 +1073,19 @@ async def update_tarjeta(
     # Cambio de estado
     if "columna" in upd:
         nuevo = upd["columna"]
-        _move_card_status(db, t, nuevo, user, notify=True)
+        _move_card_status(db, t, nuevo, user, notify=True, client_ip=client_ip)
+
+    if changed_fields:
+        record_card_audit(
+            db,
+            tarjeta_id=t.id,
+            action=ACTION_UPDATED,
+            old_status=t.status,
+            new_status=t.status,
+            client_ip=client_ip,
+            user=user,
+            details=json.dumps(changed_fields, ensure_ascii=True),
+        )
 
     db.commit()
     db.refresh(t)
@@ -1080,12 +1124,24 @@ async def batch_update_positions(
         cards_by_id = {t.id: t for t in locked_cards}
 
         changed: list[dict] = []
+        client_ip = get_client_ip(request)
         for item in data.items:
             t = cards_by_id.get(item.id)
             if not t:
                 continue
             if t.status != item.columna:
-                _move_card_status(db, t, item.columna, user, notify=True)
+                _move_card_status(db, t, item.columna, user, notify=True, client_ip=client_ip)
+            elif t.position != item.posicion:
+                record_card_audit(
+                    db,
+                    tarjeta_id=t.id,
+                    action=ACTION_REORDERED,
+                    old_status=t.status,
+                    new_status=t.status,
+                    client_ip=client_ip,
+                    user=user,
+                    details=json.dumps({"posicion": item.posicion}, ensure_ascii=True),
+                )
             t.position = item.posicion
             changed.append({"id": t.id, "columna": t.status, "posicion": t.position})
 
@@ -1110,6 +1166,7 @@ async def batch_update_positions(
 
 @router.post("/batch")
 async def batch_operations(
+    request: Request,
     data: BatchOperationRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -1119,6 +1176,7 @@ async def batch_operations(
     if not cards:
         raise HTTPException(status_code=404, detail="No cards found")
 
+    client_ip = get_client_ip(request)
     updated = []
     for t in cards:
         if data.action == "move" and data.value:
@@ -1128,14 +1186,44 @@ async def batch_operations(
                 data.value,
                 user,
                 notify=True,
+                client_ip=client_ip,
             )
         elif data.action == "assign" and data.value is not None:
             t.assigned_to = int(data.value) if data.value else None
             t.assigned_name = data.assign_name or ""
+            record_card_audit(
+                db,
+                tarjeta_id=t.id,
+                action=ACTION_ASSIGNED,
+                old_status=t.status,
+                new_status=t.status,
+                client_ip=client_ip,
+                user=user,
+                details=json.dumps({"asignado": data.assign_name or data.value}, ensure_ascii=True),
+            )
         elif data.action == "priority" and data.value:
             t.priority = data.value
+            record_card_audit(
+                db,
+                tarjeta_id=t.id,
+                action=ACTION_PRIORITY_CHANGED,
+                old_status=t.status,
+                new_status=t.status,
+                client_ip=client_ip,
+                user=user,
+                details=json.dumps({"prioridad": data.value}, ensure_ascii=True),
+            )
         elif data.action == "delete":
             t.deleted_at = datetime.now(UTC)
+            record_card_audit(
+                db,
+                tarjeta_id=t.id,
+                action=ACTION_DELETED,
+                old_status=t.status,
+                new_status=t.status,
+                client_ip=client_ip,
+                user=user,
+            )
         elif data.action == "tag" and data.value is not None:
             existing = db.execute(
                 select(repair_card_tags.c.tag_id).where(
@@ -1147,6 +1235,16 @@ async def batch_operations(
                 db.execute(repair_card_tags.insert().values(
                     repair_card_id=t.id, tag_id=int(data.value),
                 ))
+                record_card_audit(
+                    db,
+                    tarjeta_id=t.id,
+                    action=ACTION_TAG_ADDED,
+                    old_status=t.status,
+                    new_status=t.status,
+                    client_ip=client_ip,
+                    user=user,
+                    details=json.dumps({"tag_id": int(data.value)}, ensure_ascii=True),
+                )
         updated.append(t.id)
 
     db.commit()
@@ -1169,13 +1267,24 @@ async def batch_operations(
 @router.delete("/{id}", status_code=204)
 async def delete_tarjeta(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    client_ip = get_client_ip(request)
     t.deleted_at = datetime.now(UTC)
+    record_card_audit(
+        db,
+        tarjeta_id=t.id,
+        action=ACTION_DELETED,
+        old_status=t.status,
+        new_status=t.status,
+        client_ip=client_ip,
+        user=user,
+    )
     db.commit()
     invalidate_stats()
     try:
@@ -1188,13 +1297,24 @@ async def delete_tarjeta(
 @router.put("/{id}/restore")
 async def restore_tarjeta(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     t = db.query(RepairCard).filter(RepairCard.id == id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    client_ip = get_client_ip(request)
     t.deleted_at = None
+    record_card_audit(
+        db,
+        tarjeta_id=t.id,
+        action=ACTION_RESTORED,
+        old_status=t.status,
+        new_status=t.status,
+        client_ip=client_ip,
+        user=user,
+    )
     db.commit()
     db.refresh(t)
     invalidate_stats()
@@ -1270,14 +1390,17 @@ def get_timeline(
     for e in status_events:
         events.append(
             {
-                "event_type": "status_changed",
+                "event_type": e.action or "status_changed",
                 "event_at": e.changed_at.strftime("%Y-%m-%d %H:%M:%S") if e.changed_at else None,
                 "event_id": f"status_{e.id}",
                 "data": {
+                    "action": e.action or "status_changed",
                     "old_status": e.old_status,
                     "new_status": e.new_status,
                     "changed_by": e.changed_by,
                     "changed_by_name": e.changed_by_name,
+                    "client_ip": e.client_ip,
+                    "details": e.details,
                 },
             }
         )
@@ -1597,6 +1720,7 @@ def delete_tarjeta_media(
 @router.patch("/{id}/block")
 async def block_tarjeta(
     id: int,
+    request: Request,
     data: BlockRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -1606,14 +1730,34 @@ async def block_tarjeta(
     if not t:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
+    client_ip = get_client_ip(request)
     if data.blocked:
         t.blocked_at = datetime.now(UTC)
         t.blocked_reason = data.reason or ""
         t.blocked_by = data.user_id or user.id
+        record_card_audit(
+            db,
+            tarjeta_id=t.id,
+            action=ACTION_BLOCKED,
+            old_status=t.status,
+            new_status=t.status,
+            client_ip=client_ip,
+            user=user,
+            details=data.reason or None,
+        )
     else:
         t.blocked_at = None
         t.blocked_reason = None
         t.blocked_by = None
+        record_card_audit(
+            db,
+            tarjeta_id=t.id,
+            action=ACTION_UNBLOCKED,
+            old_status=t.status,
+            new_status=t.status,
+            client_ip=client_ip,
+            user=user,
+        )
 
     db.commit()
     db.refresh(t)

@@ -526,7 +526,7 @@ export const api = {
     });
     await ensureOk(res);
   },
-  async getHistorial(id: number): Promise<{ id: number; tarjeta_id: number; old_status: string | null; new_status: string; changed_at: string | null; changed_by_name: string | null }[]> {
+  async getHistorial(id: number): Promise<HistorialEntry[]> {
     const res = await fetchWithAuth(`${API_BASE}/api/tarjetas/${id}/historial`, { headers: authHeaders() });
     await ensureOk(res);
     return res.json();
@@ -826,14 +826,30 @@ export interface KanbanMetrics {
   blocked_count: number;
 }
 
+export interface HistorialEntry {
+  id: number;
+  tarjeta_id: number;
+  action: string;
+  old_status: string | null;
+  new_status: string;
+  changed_at: string | null;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  client_ip: string | null;
+  details: string | null;
+}
+
 export interface ActivityItem {
   id: number;
   tarjeta_id: number;
+  action: string;
   old_status: string | null;
   new_status: string;
   changed_at: string;
   changed_by: number | null;
   changed_by_name: string | null;
+  client_ip: string | null;
+  details: string | null;
   nombre_propietario: string;
 }
 
