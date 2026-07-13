@@ -855,6 +855,7 @@ body {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   position: relative;
+  container-type: inline-size;
   overflow: hidden;
   transition: box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1),
               border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
@@ -1056,6 +1057,22 @@ body {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+@container (max-width: 390px) {
+  .tarjeta-footer {
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .tarjeta-footer-left {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .tarjeta-footer-right {
+    margin-left: auto;
+  }
 }
 
 .date-badge {
