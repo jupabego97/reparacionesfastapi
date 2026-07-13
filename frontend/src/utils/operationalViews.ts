@@ -48,18 +48,29 @@ export function cardMatchesOperationalView(
   viewId: OperationalViewId,
   today = new Date(),
 ): boolean {
+  const colombiaDate = getColombiaDateKey(today);
   if (viewId === 'all') return true;
   if (viewId === 'blocked') return !!card.bloqueada;
   if (viewId === 'ready') return card.columna === 'para_entregar';
   if (viewId === 'overdue') {
     if (!card.fecha_limite) return false;
-    const due = new Date(card.fecha_limite);
-    due.setHours(23, 59, 59, 999);
-    return due < today && card.columna !== 'listos';
+    return card.fecha_limite.slice(0, 10) < colombiaDate && card.columna !== 'listos';
   }
   if (viewId === 'due_today') {
     if (!card.fecha_limite) return false;
-    return card.fecha_limite.startsWith(today.toISOString().split('T')[0]);
+    return card.fecha_limite.slice(0, 10) === colombiaDate;
   }
   return true;
+}
+
+function getColombiaDateKey(date: Date): string {
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date).map(part => [part.type, part.value]),
+  );
+  return `${values.year}-${values.month}-${values.day}`;
 }
