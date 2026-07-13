@@ -437,6 +437,7 @@ def _serialize_board_items(items: list[RepairCard], db: Session, include_image: 
             "asignado_nombre": t.assigned_name,
             "asignado_a": t.assigned_to,
             "whatsapp": t.whatsapp_number,
+            "fecha_ingreso": t.ingresado_date.strftime("%Y-%m-%d %H:%M:%S") if t.ingresado_date else None,
             "fecha_limite": t.due_date.strftime("%Y-%m-%d") if t.due_date else None,
             "tiene_cargador": t.has_charger,
             "notas_tecnicas_resumen": (notas[:120] + "...") if len(notas) > 120 else notas,

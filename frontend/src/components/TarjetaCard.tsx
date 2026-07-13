@@ -38,6 +38,15 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
+function formatEntryDateTime(value: string | null | undefined, compact = false): string {
+  if (!value) return '';
+  const [datePart, timePart = ''] = value.replace('T', ' ').split(' ');
+  const [year, month, day] = datePart.split('-');
+  if (!year || !month || !day) return value;
+  const date = compact ? `${day}/${month}` : `${day}/${month}/${year}`;
+  return timePart ? `${date} ${timePart.slice(0, 5)}` : date;
+}
+
 function TarjetaCardComponent({
   tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect,
   onBlock, onUnblock, dragHandleProps, isDragging, highlighted,
@@ -54,6 +63,7 @@ function TarjetaCardComponent({
   const isBlocked = !!t.bloqueada;
   const notaTecnica = t.notas_tecnicas_resumen || t.notas_tecnicas || '';
   const thumb = t.cover_thumb_url || t.imagen_url || '';
+  const entryDateTime = formatEntryDateTime(t.fecha_ingreso);
 
   const handleCardClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -107,6 +117,11 @@ function TarjetaCardComponent({
             <span className="priority-dot" style={{ background: prio.color }}></span>
             <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
             {t.asignado_nombre && <span className="assigned-badge" title={t.asignado_nombre}>{t.asignado_nombre[0]}</span>}
+            {entryDateTime && (
+              <span className="compact-entry-date" title={`Ingresó: ${entryDateTime}`}>
+                <i className="far fa-clock"></i> {formatEntryDateTime(t.fecha_ingreso, true)}
+              </span>
+            )}
             <div className="tarjeta-compact-actions">
               {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
               {whatsUrl && <button className="btn-wa-sm" onClick={e => { e.stopPropagation(); openWhatsAppSmart(t.whatsapp, `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim()); }} title="WhatsApp"><i className="fab fa-whatsapp"></i></button>}
@@ -271,6 +286,11 @@ function TarjetaCardComponent({
 
         <div className="tarjeta-footer">
           <div className="tarjeta-footer-left">
+            {entryDateTime && (
+              <span className="date-badge entry-date-badge" title={`Fecha y hora de ingreso: ${entryDateTime}`}>
+                <i className="fas fa-sign-in-alt"></i> {entryDateTime}
+              </span>
+            )}
             {t.fecha_limite && (
               <span className={`date-badge ${overdue ? 'overdue' : ''}`}>
                 <i className="fas fa-calendar-alt"></i> {t.fecha_limite}

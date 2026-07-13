@@ -1069,6 +1069,17 @@ body {
   font-weight: 600;
 }
 
+.entry-date-badge {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.compact-entry-date {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 .charger-badge {
   color: var(--success);
 }

@@ -7,6 +7,7 @@ export interface TarjetaBoardItem {
   problema: string | null;
   whatsapp: string | null;
   fecha_inicio: string | null;
+  fecha_ingreso?: string | null;
   fecha_limite: string | null;
   columna: string;
   tiene_cargador: string | null;
