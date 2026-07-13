@@ -84,7 +84,7 @@ export function removeCardPatch(data: BoardInfiniteData | undefined, id: number)
   if (!data) return data;
   const existing = findCardInBoard(data, id);
 
-  let nextPages = data.pages.map(page => ({
+  const nextPages = data.pages.map(page => ({
     ...page,
     tarjetas: page.tarjetas.filter(t => t.id !== id),
   }));

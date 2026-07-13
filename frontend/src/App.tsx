@@ -110,7 +110,7 @@ async function fetchBoardCards(params: {
 }
 
 export default function App() {
-  const { user, isAuthenticated, logout, loading: authLoading, token } = useAuth();
+  const { user, isAuthenticated, logout, loading: authLoading, token, refreshSession } = useAuth();
   const qc = useQueryClient();
   const isMobile = useIsMobile();
   const [mobileHome, setMobileHome] = useState(true);
@@ -471,11 +471,53 @@ export default function App() {
       transports: safeMode ? ['polling'] : ['polling', 'websocket'],
       upgrade: !safeMode,
       reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1_000,
+      reconnectionDelayMax: 5_000,
+      randomizationFactor: 0.5,
+      timeout: 10_000,
     });
+    let disposed = false;
+    let refreshTriggered = false;
+    const showReconnecting = () => setConnStatus('connecting');
 
-    s.on('connect', () => setConnStatus('connected'));
-    s.on('disconnect', () => setConnStatus('disconnected'));
-    s.on('connect_error', () => setConnStatus('disconnected'));
+    s.on('connect', () => {
+      refreshTriggered = false;
+      setConnStatus('connected');
+    });
+    s.on('disconnect', () => {
+      if (!disposed) setConnStatus(s.active ? 'connecting' : 'disconnected');
+    });
+    s.on('connect_error', () => {
+      if (s.active) {
+        showReconnecting();
+        return;
+      }
+      if (refreshTriggered) {
+        setConnStatus('disconnected');
+        return;
+      }
+      refreshTriggered = true;
+      showReconnecting();
+      void refreshSession().then(refreshed => {
+        if (!refreshed) setConnStatus('disconnected');
+      });
+    });
+    s.io.on('reconnect_attempt', showReconnecting);
+    s.io.on('reconnect_error', showReconnecting);
+    s.io.on('reconnect_failed', () => setConnStatus('disconnected'));
+
+    const reconnectWhenOnline = () => {
+      if (!s.connected) {
+        showReconnecting();
+        s.connect();
+      }
+    };
+    const reconnectWhenVisible = () => {
+      if (document.visibilityState === 'visible') reconnectWhenOnline();
+    };
+    window.addEventListener('online', reconnectWhenOnline);
+    document.addEventListener('visibilitychange', reconnectWhenVisible);
 
     s.on('tarjeta_creada', (payload: SocketEnvelope<TarjetaBoardItem>) => {
       const card = unwrapSocketData(payload);
@@ -532,12 +574,15 @@ export default function App() {
 
     setConnStatus('connecting');
     return () => {
+      disposed = true;
+      window.removeEventListener('online', reconnectWhenOnline);
+      document.removeEventListener('visibilitychange', reconnectWhenVisible);
       if (reorderTimerRef.current != null) {
         window.clearTimeout(reorderTimerRef.current);
       }
       s.disconnect();
     };
-  }, [isAuthenticated, token, qc, flushReorderBuffer, pulseCard]);
+  }, [isAuthenticated, token, qc, flushReorderBuffer, pulseCard, refreshSession]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;

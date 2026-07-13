@@ -1,5 +1,6 @@
 /** URL del backend. En producción (servicios separados) = VITE_API_URL. En dev con proxy = '' */
 export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+export const AUTH_TOKEN_REFRESHED_EVENT = 'auth-token-refreshed';
 
 export interface TarjetaBoardItem {
   id: number;
@@ -308,6 +309,11 @@ async function refreshTokenIfPossible(): Promise<string | null> {
       if (!data) { localStorage.removeItem('device_token'); return null; }
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('device_token', data.device_token);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent<string>(AUTH_TOKEN_REFRESHED_EVENT, {
+          detail: data.access_token,
+        }));
+      }
       return data.access_token;
     })
     .catch(() => null)
