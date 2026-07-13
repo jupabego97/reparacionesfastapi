@@ -38,25 +38,6 @@ function isOverdue(fechaLimite: string | null): boolean {
   return new Date(fechaLimite) < new Date();
 }
 
-function riskLabel(t: TarjetaBoardItem): { text: string; className: string; icon: string } | null {
-  if (t.bloqueada) {
-    return { text: t.motivo_bloqueo ? `Bloqueada: ${t.motivo_bloqueo}` : 'Bloqueada', className: 'risk-blocked', icon: 'fas fa-lock' };
-  }
-  if (isOverdue(t.fecha_limite)) {
-    return { text: 'Vencida', className: 'risk-overdue', icon: 'fas fa-exclamation-circle' };
-  }
-  if ((t.dias_en_columna || 0) >= 7) {
-    return { text: `${t.dias_en_columna}d en columna`, className: 'risk-aging', icon: 'fas fa-hourglass-half' };
-  }
-  if (t.fecha_limite) {
-    const today = new Date().toISOString().split('T')[0];
-    if (t.fecha_limite.startsWith(today)) {
-      return { text: 'Vence hoy', className: 'risk-due-today', icon: 'fas fa-calendar-day' };
-    }
-  }
-  return null;
-}
-
 function TarjetaCardComponent({
   tarjeta, columnas, onEdit, onDelete: _onDelete, onMove, compact, selectable, selected, onSelect,
   onBlock, onUnblock, dragHandleProps, isDragging, highlighted,
@@ -66,7 +47,6 @@ function TarjetaCardComponent({
   const prio = PRIORITY_CONFIG[t.prioridad] || PRIORITY_CONFIG.media;
   const overdue = isOverdue(t.fecha_limite);
   const daysColor = timeColor(t.dias_en_columna || 0);
-  const risk = riskLabel(t);
   const whatsUrl = toWhatsAppUrl(
     t.whatsapp,
     `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim(),
@@ -111,11 +91,6 @@ function TarjetaCardComponent({
             {dragHandleProps && (
               <span className="drag-handle-compact" {...dragHandleProps} onClick={e => e.stopPropagation()}><i className="fas fa-grip-vertical"></i></span>
             )}
-            {selectable && (
-              <div className="card-checkbox card-checkbox-compact" onClick={e => { e.stopPropagation(); onSelect?.(t.id); }}>
-                <i className={selected ? 'fas fa-check-square' : 'far fa-square'}></i>
-              </div>
-            )}
             {thumb && (
               <img
                 src={thumb}
@@ -131,7 +106,6 @@ function TarjetaCardComponent({
             )}
             <span className="priority-dot" style={{ background: prio.color }}></span>
             <span className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</span>
-            {risk && <span className={`card-risk-chip ${risk.className}`} title={risk.text}><i className={risk.icon}></i></span>}
             {t.asignado_nombre && <span className="assigned-badge" title={t.asignado_nombre}>{t.asignado_nombre[0]}</span>}
             <div className="tarjeta-compact-actions">
               {t.tags?.length > 0 && <span className="tag-count">{t.tags.length} <i className="fas fa-tags"></i></span>}
@@ -198,40 +172,22 @@ function TarjetaCardComponent({
           </div>
         )}
 
-        <div className="tarjeta-signals">
-          <div className="tarjeta-signal-primary">
-            {thumb && (
-              <img
-                src={thumb}
-                alt=""
-                className="tarjeta-signal-thumb"
-                width={36}
-                height={36}
-                loading="lazy"
-                decoding="async"
-              />
-            )}
-            <div className="tarjeta-signal-client">
-              <strong className="tarjeta-name">{t.nombre_propietario || 'Cliente'}</strong>
-              {(t.problema_resumen || t.problema) && (t.problema || t.problema_resumen) !== 'Sin descripcion' && (
-                <span className="tarjeta-equipo-hint">{t.problema_resumen || t.problema}</span>
-              )}
-            </div>
+        {isBlocked && (
+          <div className="blocked-banner">
+            <i className="fas fa-lock"></i> Bloqueada{t.motivo_bloqueo ? `: ${t.motivo_bloqueo}` : ''}
           </div>
-          {risk && (
-            <div className={`card-risk-badge ${risk.className}`} title={risk.text}>
-              <i className={risk.icon}></i>
-              <span>{risk.text}</span>
-            </div>
-          )}
-          <div className="tarjeta-signal-assignee">
-            {t.asignado_nombre ? (
-              <span className="assigned-badge assigned-badge-lg" title={`Asignado: ${t.asignado_nombre}`}>
+        )}
+
+        <div className="tarjeta-header">
+          <div className="tarjeta-title-row">
+            <i className={prio.icon} style={{ color: prio.color, fontSize: '0.75rem' }} title={`Prioridad ${prio.label}`}></i>
+            <strong className="tarjeta-name" onClick={() => onEdit(t)}>{t.nombre_propietario || 'Cliente'}</strong>
+          </div>
+          <div className="tarjeta-meta">
+            {t.asignado_nombre && (
+              <span className="assigned-badge" title={`Asignado: ${t.asignado_nombre}`} style={{ background: '#6366f1' }}>
                 {t.asignado_nombre.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                <span className="assignee-name">{t.asignado_nombre.split(' ')[0]}</span>
               </span>
-            ) : (
-              <span className="unassigned-badge"><i className="fas fa-user-slash"></i> Sin asignar</span>
             )}
             {t.dias_en_columna > 0 && (
               <span className="days-badge" style={{ color: daysColor }} title={`${t.dias_en_columna} dias en esta columna`}>
@@ -241,21 +197,26 @@ function TarjetaCardComponent({
           </div>
         </div>
 
+        {(t.problema_resumen || t.problema) && (t.problema || t.problema_resumen) !== 'Sin descripcion' && (
+          <p className="tarjeta-problem" aria-label="Problema reportado">
+            <strong>Problema:</strong> {t.problema_resumen || (t.problema!.length > 80 ? t.problema!.slice(0, 80) + '...' : t.problema)}
+          </p>
+        )}
+
         {notaTecnica && (
           <div className="tarjeta-notas-tecnicas" aria-label="Notas técnicas">
             <i className="fas fa-wrench"></i>
-            <span>{notaTecnica}</span>
+            <span><strong>Notas técnicas:</strong> {notaTecnica}</span>
           </div>
         )}
 
         {t.tags && t.tags.length > 0 && (
           <div className="tarjeta-tags">
-            {t.tags.slice(0, 3).map(tag => (
+            {t.tags.map(tag => (
               <span key={tag.id} className="tag-chip" style={{ background: tag.color + '22', color: tag.color, borderColor: tag.color + '44' }}>
                 {tag.name}
               </span>
             ))}
-            {t.tags.length > 3 && <span className="tag-more">+{t.tags.length - 3}</span>}
           </div>
         )}
 
@@ -266,6 +227,19 @@ function TarjetaCardComponent({
             </div>
             <span className="subtasks-text">{t.subtasks_done}/{t.subtasks_total}</span>
           </div>
+        )}
+
+        {(t.cover_thumb_url || t.imagen_url) && (
+          <img
+            src={t.cover_thumb_url || t.imagen_url || ''}
+            alt="Equipo"
+            className="tarjeta-thumbnail"
+            width={320}
+            height={140}
+            loading="lazy"
+            decoding="async"
+            onClick={e => { e.stopPropagation(); window.open(t.imagen_url || t.cover_thumb_url || '', '_blank', 'noopener,noreferrer'); }}
+          />
         )}
 
         {(prevCol || nextCol) && (
@@ -310,26 +284,28 @@ function TarjetaCardComponent({
               </span>
             )}
           </div>
-          <div className="tarjeta-footer-actions">
-            <button
-              className={`btn-action btn-block-card ${isBlocked ? 'blocked' : ''}`}
-              onClick={handleBlockClick}
-              title={isBlocked ? 'Desbloquear' : 'Bloquear'}
-              aria-label={isBlocked ? 'Desbloquear tarjeta' : 'Bloquear tarjeta'}
-            >
-              <i className={isBlocked ? 'fas fa-unlock' : 'fas fa-lock'}></i>
-            </button>
-            {whatsUrl && (
+          <div className="tarjeta-footer-right">
+            {(onBlock || onUnblock) && (
               <button
-                className="btn-action btn-wa"
-                onClick={e => { e.stopPropagation(); openWhatsAppSmart(t.whatsapp, `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim()); }}
-                title="WhatsApp"
-                aria-label="Abrir WhatsApp"
+                type="button"
+                className={`btn-action btn-block-card ${isBlocked ? 'blocked' : ''}`}
+                title={isBlocked ? 'Desbloquear tarjeta' : 'Bloquear tarjeta'}
+                aria-label={isBlocked ? 'Desbloquear tarjeta' : 'Bloquear tarjeta'}
+                onClick={handleBlockClick}
               >
-                <i className="fab fa-whatsapp"></i>
+                <i className={isBlocked ? 'fas fa-lock-open' : 'fas fa-lock'}></i>
               </button>
             )}
-            <button className="btn-action btn-edit" onClick={e => { e.stopPropagation(); onEdit(t); }} title="Editar" aria-label="Editar tarjeta">
+            {whatsUrl && (
+              <button
+                className="btn-wa-action btn-wa-big"
+                onClick={e => { e.stopPropagation(); openWhatsAppSmart(t.whatsapp, `Hola ${t.nombre_propietario || ''}, le escribimos de Nanotronics respecto a su equipo en reparacion.`.trim()); }}
+                title="Escribir por WhatsApp"
+              >
+                <i className="fab fa-whatsapp"></i> WhatsApp
+              </button>
+            )}
+            <button className="btn-action btn-edit" onClick={() => onEdit(t)} title="Editar" aria-label="Editar tarjeta">
               <i className="fas fa-pen"></i>
             </button>
           </div>
