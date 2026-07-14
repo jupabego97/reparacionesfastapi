@@ -471,11 +471,15 @@ export default function KanbanBoard({
           const totalInColumn = columnTotals?.[col.key] ?? cards.length;
           const stats = columnStats[col.key] || { blocked: 0, maxDays: 0 };
           const slaHours = kanbanRules?.sla_by_column?.[col.key];
-          const slaDays = slaHours ? Math.ceil(slaHours / 24) : 7;
+          const hasSla = typeof slaHours === 'number' && slaHours > 0;
+          const slaDays = hasSla ? Math.ceil(slaHours / 24) : 0;
+          const overSlaCount = hasSla
+            ? cards.filter(card => (card.dias_en_columna || 0) >= slaDays).length
+            : 0;
           const wipExceeded = col.wip_limit != null && totalInColumn > col.wip_limit;
           const wipFull = col.wip_limit != null && totalInColumn >= col.wip_limit;
           const isOverTarget = overColumn === col.key;
-          const showAgingAlert = stats.maxDays >= slaDays;
+          const showAgingAlert = overSlaCount > 0;
 
           return (
             <div key={col.key} className={`kanban-column ${isOverTarget ? 'drag-over' : ''} ${wipExceeded ? 'wip-exceeded' : ''} ${wipFull ? 'wip-full' : ''}`}
@@ -489,7 +493,11 @@ export default function KanbanBoard({
                   </span>
                 </div>
                 <div className="column-meta-row">
-                  <span className="column-showing">Mostrando {cards.length} de {totalInColumn}</span>
+                  <span className="column-showing">
+                    {cards.length === totalInColumn
+                      ? `${totalInColumn} tarjeta${totalInColumn === 1 ? '' : 's'}`
+                      : `Mostrando ${cards.length} de ${totalInColumn}`}
+                  </span>
                   {col.wip_limit != null && (
                     <span className={`wip-indicator ${wipExceeded ? 'exceeded' : ''} ${wipFull ? 'full' : ''}`}>
                       WIP {totalInColumn}/{col.wip_limit}
@@ -503,7 +511,12 @@ export default function KanbanBoard({
                       <span className="column-alert column-alert-blocked"><i className="fas fa-lock"></i> {stats.blocked} bloqueada{stats.blocked > 1 ? 's' : ''}</span>
                     )}
                     {showAgingAlert && (
-                      <span className="column-alert column-alert-aging"><i className="fas fa-hourglass-half"></i> Hasta {stats.maxDays}d</span>
+                      <span
+                        className="column-alert column-alert-aging"
+                        title={`Hay ${overSlaCount} tarjeta${overSlaCount === 1 ? '' : 's'} con ${slaDays} días o más en esta columna`}
+                      >
+                        <i className="fas fa-hourglass-half"></i> {overSlaCount} supera SLA
+                      </span>
                     )}
                   </div>
                 )}
