@@ -35,6 +35,7 @@ import {
 const NuevaTarjetaModal = lazy(() => import('./components/NuevaTarjetaModal'));
 const EditarTarjetaModal = lazy(() => import('./components/EditarTarjetaModal'));
 const EstadisticasModal = lazy(() => import('./components/EstadisticasModal'));
+const DesempenoModal = lazy(() => import('./components/DesempenoModal'));
 const ExportarModal = lazy(() => import('./components/ExportarModal'));
 
 type ThemeMode = 'light' | 'dark';
@@ -148,6 +149,7 @@ export default function App() {
   const [showNew, setShowNew] = useState(false);
   const [editCardId, setEditCardId] = useState<number | null>(null);
   const [showStats, setShowStats] = useState(false);
+  const [showDesempeno, setShowDesempeno] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
 
@@ -587,6 +589,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setShowNew(true); }
+      else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); setShowDesempeno(true); }
       else if (e.key === 'e' || e.key === 'E') { e.preventDefault(); setShowStats(true); }
       else if (e.key === 'x' || e.key === 'X') { e.preventDefault(); setShowExport(true); }
       else if (e.key === 'a' || e.key === 'A') { e.preventDefault(); setShowActivity(true); }
@@ -595,6 +598,7 @@ export default function App() {
         setShowNew(false);
         setEditCardId(null);
         setShowStats(false);
+        setShowDesempeno(false);
         setShowExport(false);
         setShowActivity(false);
         if (selectMode) {
@@ -758,6 +762,9 @@ export default function App() {
             </button>
             {showMoreMenu && (
               <div id="header-more-menu" className="header-more-menu" role="menu">
+                <button className="header-more-item" role="menuitem" onClick={() => { setShowDesempeno(true); setShowMoreMenu(false); }}>
+                  <i className="fas fa-tachometer-alt"></i> Desempeño
+                </button>
                 <button className="header-more-item" role="menuitem" onClick={() => { setShowStats(true); setShowMoreMenu(false); }}>
                   <i className="fas fa-chart-bar"></i> Estadisticas
                 </button>
@@ -796,7 +803,7 @@ export default function App() {
               <i className="fas fa-calendar-alt"></i> Calendario
             </button>
           </div>
-          <span className="shortcuts-hint toolbar-secondary" title="N = Nueva | E = Estadisticas | X = Exportar | A = Actividad | / = Buscar | ←/→ = Tarjetas | Esc = Cerrar">
+          <span className="shortcuts-hint toolbar-secondary" title="N = Nueva | D = Desempeño | E = Estadisticas | X = Exportar | A = Actividad | / = Buscar | ←/→ = Tarjetas | Esc = Cerrar">
             <i className="fas fa-keyboard"></i> Atajos
           </span>
           <select
@@ -978,6 +985,12 @@ export default function App() {
           />
         )}
         {showStats && <EstadisticasModal onClose={() => setShowStats(false)} />}
+        {showDesempeno && (
+          <DesempenoModal
+            onClose={() => setShowDesempeno(false)}
+            onOpenView={viewId => applyOperationalView(viewId)}
+          />
+        )}
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
       </Suspense>
 

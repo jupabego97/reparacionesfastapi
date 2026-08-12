@@ -2,7 +2,8 @@
 
 Optimizado: queries batch en vez de O(N*M), cálculos en DB en vez de Python.
 """
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
@@ -16,6 +17,77 @@ router = APIRouter(prefix="/api/metricas", tags=["metricas"])
 
 METRICAS_CACHE_KEY = "metricas_kanban"
 METRICAS_TTL = 120  # 2 minutes
+BOGOTA = ZoneInfo("America/Bogota")
+DAILY_CACHE_KEY = "metricas_diario"
+DAILY_TTL = 60
+
+
+def _day_bounds_utc(day: date) -> tuple[datetime, datetime]:
+    start_local = datetime.combine(day, time.min, tzinfo=BOGOTA)
+    start_utc = start_local.astimezone(UTC)
+    return start_utc, start_utc + timedelta(days=1)
+
+
+def _count_in_range(db: Session, field, start: datetime, end: datetime) -> int:
+    return (
+        db.query(func.count(RepairCard.id))
+        .filter(
+            RepairCard.deleted_at.is_(None),
+            field.isnot(None),
+            field >= start,
+            field < end,
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _sum_cost_in_range(db: Session, start: datetime, end: datetime) -> float:
+    total = (
+        db.query(func.coalesce(func.sum(RepairCard.final_cost), 0))
+        .filter(
+            RepairCard.deleted_at.is_(None),
+            RepairCard.entregados_date.isnot(None),
+            RepairCard.entregados_date >= start,
+            RepairCard.entregados_date < end,
+        )
+        .scalar()
+    )
+    return round(float(total or 0), 2)
+
+
+def _count_sla_violations(db: Session, now: datetime) -> int:
+    from app.models.kanban import KanbanColumn
+
+    columns = db.query(KanbanColumn).filter(KanbanColumn.sla_hours.isnot(None)).all()
+    if not columns:
+        return 0
+
+    date_field_map = {
+        "ingresado": RepairCard.ingresado_date,
+        "diagnosticada": RepairCard.diagnosticada_date,
+        "para_entregar": RepairCard.para_entregar_date,
+    }
+    total = 0
+    for col in columns:
+        if not col.sla_hours:
+            continue
+        date_field = date_field_map.get(col.key)
+        if date_field is None:
+            continue
+        threshold = now - timedelta(hours=col.sla_hours)
+        total += (
+            db.query(func.count(RepairCard.id))
+            .filter(
+                RepairCard.deleted_at.is_(None),
+                RepairCard.status == col.key,
+                date_field.isnot(None),
+                date_field < threshold,
+            )
+            .scalar()
+            or 0
+        )
+    return total
 
 
 @router.get("/kanban")
@@ -229,4 +301,128 @@ def get_kanban_metrics(
     }
 
     set_cached(cache_key, result, METRICAS_TTL)
+    return result
+
+
+@router.get("/diario")
+def get_daily_metrics(db: Session = Depends(get_db)):
+    """KPIs operativos del día (zona horaria America/Bogota) con comparación ayer/7d."""
+    cached = get_cached(DAILY_CACHE_KEY, DAILY_TTL)
+    if cached is not None:
+        return cached
+
+    now_utc = datetime.now(UTC)
+    today_local = datetime.now(BOGOTA).date()
+    yesterday_local = today_local - timedelta(days=1)
+
+    today_start, today_end = _day_bounds_utc(today_local)
+    yesterday_start, yesterday_end = _day_bounds_utc(yesterday_local)
+
+    ingresos_hoy = _count_in_range(db, RepairCard.ingresado_date, today_start, today_end)
+    entregas_hoy = _count_in_range(db, RepairCard.entregados_date, today_start, today_end)
+    cobrado_hoy = _sum_cost_in_range(db, today_start, today_end)
+
+    ingresos_ayer = _count_in_range(db, RepairCard.ingresado_date, yesterday_start, yesterday_end)
+    entregas_ayer = _count_in_range(db, RepairCard.entregados_date, yesterday_start, yesterday_end)
+    cobrado_ayer = _sum_cost_in_range(db, yesterday_start, yesterday_end)
+
+    ingresos_7d = 0
+    entregas_7d = 0
+    cobrado_7d = 0.0
+    for offset in range(7):
+        day = today_local - timedelta(days=offset)
+        start, end = _day_bounds_utc(day)
+        ingresos_7d += _count_in_range(db, RepairCard.ingresado_date, start, end)
+        entregas_7d += _count_in_range(db, RepairCard.entregados_date, start, end)
+        cobrado_7d += _sum_cost_in_range(db, start, end)
+
+    blocked_count = (
+        db.query(func.count(RepairCard.id))
+        .filter(RepairCard.deleted_at.is_(None), RepairCard.blocked_at.isnot(None))
+        .scalar()
+        or 0
+    )
+    sla_count = _count_sla_violations(db, now_utc)
+
+    # WIP por columna (snapshot actual)
+    wip_rows = (
+        db.query(RepairCard.status, func.count(RepairCard.id))
+        .filter(RepairCard.deleted_at.is_(None), RepairCard.status != "listos")
+        .group_by(RepairCard.status)
+        .all()
+    )
+    wip_por_columna = {status: count for status, count in wip_rows}
+    pendientes = sum(wip_por_columna.values())
+
+    # Productividad por técnico (últimos 7 días)
+    week_start, _ = _day_bounds_utc(today_local - timedelta(days=6))
+    tech_rows = (
+        db.query(
+            RepairCard.assigned_to,
+            RepairCard.assigned_name,
+            func.count(RepairCard.id).label("entregadas"),
+            func.coalesce(func.sum(RepairCard.final_cost), 0).label("cobrado"),
+        )
+        .filter(
+            RepairCard.deleted_at.is_(None),
+            RepairCard.entregados_date.isnot(None),
+            RepairCard.entregados_date >= week_start,
+            RepairCard.entregados_date < today_end,
+        )
+        .group_by(RepairCard.assigned_to, RepairCard.assigned_name)
+        .order_by(func.count(RepairCard.id).desc())
+        .limit(8)
+        .all()
+    )
+    por_tecnico = [
+        {
+            "id": row.assigned_to,
+            "nombre": row.assigned_name or ("Sin asignar" if row.assigned_to is None else f"Técnico #{row.assigned_to}"),
+            "entregadas": int(row.entregadas or 0),
+            "cobrado": round(float(row.cobrado or 0), 2),
+        }
+        for row in tech_rows
+    ]
+
+    result = {
+        "fecha": today_local.isoformat(),
+        "timezone": "America/Bogota",
+        "hoy": {
+            "ingresos": ingresos_hoy,
+            "entregas": entregas_hoy,
+            "balance": entregas_hoy - ingresos_hoy,
+            "bloqueadas": blocked_count,
+            "fuera_sla": sla_count,
+            "cobrado": cobrado_hoy,
+            "pendientes": pendientes,
+        },
+        "ayer": {
+            "ingresos": ingresos_ayer,
+            "entregas": entregas_ayer,
+            "cobrado": cobrado_ayer,
+        },
+        "promedio_7d": {
+            "ingresos": round(ingresos_7d / 7, 1),
+            "entregas": round(entregas_7d / 7, 1),
+            "cobrado": round(cobrado_7d / 7, 2),
+        },
+        "wip_por_columna": wip_por_columna,
+        "por_tecnico_7d": por_tecnico,
+        "alertas": [
+            msg
+            for msg in [
+                f"{sla_count} tarjeta{'s' if sla_count != 1 else ''} fuera de SLA" if sla_count else None,
+                f"{blocked_count} bloqueada{'s' if blocked_count != 1 else ''}" if blocked_count else None,
+                (
+                    f"Cola creciendo: +{ingresos_hoy - entregas_hoy} neto hoy"
+                    if ingresos_hoy > entregas_hoy
+                    else None
+                ),
+            ]
+            if msg
+        ],
+        "generado_at": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    set_cached(DAILY_CACHE_KEY, result, DAILY_TTL)
     return result
