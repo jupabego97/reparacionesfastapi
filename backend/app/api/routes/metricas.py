@@ -315,18 +315,26 @@ def get_desempeno(
     desde: str | None = Query(None, description="Inicio de rango YYYY-MM-DD"),
     hasta: str | None = Query(None, description="Fin de rango YYYY-MM-DD"),
     tecnico_id: int | None = Query(None, ge=1, description="Filtrar un técnico"),
+    include_cierres: bool = Query(False, description="Incluir detalle de entregas"),
 ):
     """Desempeño por técnico, filtrable por día o rango en horario de Colombia."""
     try:
         start_day, end_day = resolve_date_range(fecha, desde, hasta)
     except DateRangeError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
-    return compute_desempeno(
+    cache_key = f"metricas_desempeno_{start_day}_{end_day}_{tecnico_id}_{int(include_cierres)}"
+    cached = get_cached(cache_key, 45)
+    if cached is not None:
+        return cached
+    result = compute_desempeno(
         db,
         start_day=start_day,
         end_day=end_day,
         tecnico_id=tecnico_id,
+        include_cierres=include_cierres,
     )
+    set_cached(cache_key, result, 45)
+    return result
 
 
 @router.get("/diario")

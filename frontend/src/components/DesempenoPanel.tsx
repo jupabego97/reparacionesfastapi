@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar } from 'react-chartjs-2';
 import { api } from '../api/client';
-import type { DesempenoMetrics, DesempenoTecnico, UserInfo } from '../api/client';
+import type { DesempenoMetrics, DesempenoQuery, DesempenoTecnico, UserInfo } from '../api/client';
 import { colombiaDateKey, formatDateKey, shiftDateKey } from '../utils/colombiaDate';
 
 type Preset = 'hoy' | 'ayer' | '7d' | '30d' | 'rango';
@@ -61,8 +61,18 @@ export default function DesempenoPanel() {
   const { data, isLoading, isError, refetch, isFetching } = useQuery<DesempenoMetrics>({
     queryKey: ['desempeno', queryParams],
     queryFn: () => api.getDesempeno(queryParams),
+    staleTime: 30_000,
   });
   const { data: users = [] } = useQuery<UserInfo[]>({ queryKey: ['users'], queryFn: api.getUsers, staleTime: 5 * 60_000 });
+  const detailParams = selectedTechId !== 'all' && selectedTechId != null
+    ? { ...queryParams, tecnico_id: selectedTechId, include_cierres: true }
+    : null;
+  const { data: detail } = useQuery<DesempenoMetrics>({
+    queryKey: ['desempeno-detalle', detailParams],
+    queryFn: () => api.getDesempeno(detailParams as DesempenoQuery),
+    enabled: detailParams != null,
+    staleTime: 30_000,
+  });
 
   const chartData = useMemo(() => {
     const days = data?.por_dia ?? [];
@@ -92,6 +102,9 @@ export default function DesempenoPanel() {
   const selectedTech: DesempenoTecnico | undefined = selectedTechId === 'all'
     ? undefined
     : data.tecnicos.find(item => item.id === selectedTechId);
+  const cierres = detail?.tecnicos.find(item => item.id === selectedTechId)?.cierres
+    ?? selectedTech?.cierres
+    ?? [];
   const showChart = data.dias > 1;
 
   return (
@@ -248,9 +261,9 @@ export default function DesempenoPanel() {
             <span>Comentarios: {selectedTech.comentarios}</span>
             <span>Alta: {selectedTech.por_prioridad.alta} · Media: {selectedTech.por_prioridad.media} · Baja: {selectedTech.por_prioridad.baja}</span>
           </div>
-          {selectedTech.cierres.length > 0 && (
+          {cierres.length > 0 && (
             <ul className="desempeno-cierres">
-              {selectedTech.cierres.map(cierre => (
+              {cierres.map(cierre => (
                 <li key={`${cierre.tarjeta_id}-${cierre.hora}`}>
                   <strong>#{cierre.tarjeta_id}</strong> {cierre.cliente || 'Cliente'} · {cierre.prioridad} · {cierre.hora}
                 </li>

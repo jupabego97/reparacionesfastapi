@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from statistics import median
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.kanban import Comment, KanbanColumn
@@ -128,27 +129,40 @@ def is_rework(old_status: str | None, new_status: str | None, order: dict[str, i
     return order[new_status] < order[old_status]
 
 
-def blocked_seconds(events: list[StatusHistory], start: datetime, end: datetime) -> float:
-    """Suma intervalos bloqueados que se intersectan con [start, end)."""
+def blocked_intervals(events: list[StatusHistory]) -> list[tuple[datetime, datetime | None]]:
+    intervals: list[tuple[datetime, datetime | None]] = []
     blocked_from: datetime | None = None
-    total = 0.0
     for event in events:
         moment = ensure_utc(event.changed_at)
         if moment is None:
             continue
-        if event.action == ACTION_BLOCKED:
-            if moment < start:
-                blocked_from = start
-            elif moment < end and blocked_from is None:
-                blocked_from = moment
+        if event.action == ACTION_BLOCKED and blocked_from is None:
+            blocked_from = moment
         elif event.action == ACTION_UNBLOCKED and blocked_from is not None:
-            unlock_at = min(max(moment, start), end)
-            if unlock_at > blocked_from:
-                total += (unlock_at - blocked_from).total_seconds()
+            intervals.append((blocked_from, moment))
             blocked_from = None
-    if blocked_from is not None and end > blocked_from:
-        total += (end - blocked_from).total_seconds()
+    if blocked_from is not None:
+        intervals.append((blocked_from, None))
+    return intervals
+
+
+def blocked_seconds_between(
+    intervals: list[tuple[datetime, datetime | None]],
+    start: datetime,
+    end: datetime,
+) -> float:
+    total = 0.0
+    for blocked_start, blocked_end in intervals:
+        lo = max(blocked_start, start)
+        hi = min(blocked_end or end, end)
+        if hi > lo:
+            total += (hi - lo).total_seconds()
     return max(total, 0.0)
+
+
+def blocked_seconds(events: list[StatusHistory], start: datetime, end: datetime) -> float:
+    """Suma intervalos bloqueados que se intersectan con [start, end)."""
+    return blocked_seconds_between(blocked_intervals(events), start, end)
 
 
 def _empty_tech(user: User | None, actor_id: int, fallback_name: str | None = None) -> dict:
@@ -186,6 +200,7 @@ def _actor_id(event: StatusHistory, card: RepairCard | None) -> int:
 
 def _status_durations(events: list[StatusHistory], until: datetime) -> dict[str, float]:
     """Horas acumuladas por estado hasta `until`, descontando bloqueos por intervalo."""
+    intervals = blocked_intervals(events)
     durations: dict[str, float] = defaultdict(float)
     current_status: str | None = None
     status_started: datetime | None = None
@@ -198,13 +213,13 @@ def _status_durations(events: list[StatusHistory], until: datetime) -> dict[str,
             continue
         if current_status and status_started and moment > status_started:
             raw = (moment - status_started).total_seconds()
-            blocked = blocked_seconds(events, status_started, moment)
+            blocked = blocked_seconds_between(intervals, status_started, moment)
             durations[current_status] += max(raw - blocked, 0.0) / 3600
         current_status = event.new_status
         status_started = moment
     if current_status and status_started and until > status_started:
         raw = (until - status_started).total_seconds()
-        blocked = blocked_seconds(events, status_started, until)
+        blocked = blocked_seconds_between(intervals, status_started, until)
         durations[current_status] += max(raw - blocked, 0.0) / 3600
     return durations
 
@@ -215,6 +230,7 @@ def compute_desempeno(
     start_day: date,
     end_day: date,
     tecnico_id: int | None = None,
+    include_cierres: bool = False,
 ) -> dict:
     start_utc, _ = day_bounds_utc(start_day)
     _, end_utc = day_bounds_utc(end_day)
@@ -222,20 +238,19 @@ def compute_desempeno(
     end_db = as_db_datetime(end_utc)
     order = column_order_map(db)
 
-    users = db.query(User).filter(User.is_active.is_(True)).all()
+    users_q = db.query(User).filter(User.is_active.is_(True))
+    if tecnico_id:
+        users_q = users_q.filter(User.id == tecnico_id)
+    users = users_q.all()
     users_by_id = {user.id: user for user in users}
 
-    events_in_range = (
-        db.query(StatusHistory)
-        .filter(StatusHistory.changed_at >= start_db, StatusHistory.changed_at < end_db)
-        .order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc())
-        .all()
+    events_q = db.query(StatusHistory).filter(
+        StatusHistory.changed_at >= start_db,
+        StatusHistory.changed_at < end_db,
     )
     if tecnico_id:
-        events_in_range = [
-            event for event in events_in_range
-            if event.changed_by == tecnico_id
-        ]
+        events_q = events_q.filter(StatusHistory.changed_by == tecnico_id)
+    events_in_range = events_q.order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc()).all()
 
     card_ids = {event.tarjeta_id for event in events_in_range}
     cards_by_id: dict[int, RepairCard] = {}
@@ -245,26 +260,13 @@ def compute_desempeno(
             for card in db.query(RepairCard).filter(RepairCard.id.in_(card_ids)).all()
         }
 
-    history_by_card: dict[int, list[StatusHistory]] = defaultdict(list)
-    if card_ids:
-        for event in (
-            db.query(StatusHistory)
-            .filter(StatusHistory.tarjeta_id.in_(card_ids))
-            .order_by(StatusHistory.tarjeta_id.asc(), StatusHistory.changed_at.asc(), StatusHistory.id.asc())
-            .all()
-        ):
-            history_by_card[event.tarjeta_id].append(event)
-
-    comments_in_range = (
-        db.query(Comment)
-        .filter(Comment.created_at >= start_db, Comment.created_at < end_db)
-        .all()
-    )
+    comments_q = db.query(Comment).filter(Comment.created_at >= start_db, Comment.created_at < end_db)
+    if tecnico_id:
+        comments_q = comments_q.filter(Comment.user_id == tecnico_id)
+    comments_in_range = comments_q.all()
 
     techs: dict[int, dict] = {}
     for user in users:
-        if tecnico_id and user.id != tecnico_id:
-            continue
         techs[user.id] = _empty_tech(user, user.id)
 
     daily: dict[str, dict] = {}
@@ -287,12 +289,13 @@ def compute_desempeno(
         return techs[actor_id]
 
     closed_in_period: dict[int, tuple[StatusHistory, RepairCard | None]] = {}
+    repair_events: list[tuple[int, int, datetime]] = []
     all_cycle_hours: list[float] = []
 
     for event in events_in_range:
         card = cards_by_id.get(event.tarjeta_id)
         actor_id = _actor_id(event, card)
-        if tecnico_id and actor_id != tecnico_id and event.changed_by != tecnico_id:
+        if tecnico_id and event.changed_by != tecnico_id:
             continue
         bucket = tech_bucket(actor_id, event.changed_by_name)
         day_key = to_bogota_date(ensure_utc(event.changed_at)).isoformat()
@@ -324,6 +327,9 @@ def compute_desempeno(
                 bucket["con_notas_tecnicas"] += 1
             else:
                 bucket["sin_notas_tecnicas"] += 1
+            close_at = ensure_utc(event.changed_at)
+            if close_at is not None:
+                repair_events.append((actor_id, event.tarjeta_id, close_at))
         elif event.new_status == "listos":
             bucket["entregadas"] += 1
             if day_row:
@@ -334,29 +340,41 @@ def compute_desempeno(
                 bucket["por_prioridad"][priority] += 1
             if card and card.final_cost:
                 bucket["valor_cobrado"] = round(bucket["valor_cobrado"] + float(card.final_cost), 2)
-            bucket["cierres"].append({
-                "tarjeta_id": event.tarjeta_id,
-                "cliente": card.owner_name if card else None,
-                "prioridad": priority,
-                "hora": ensure_utc(event.changed_at).astimezone(BOGOTA).strftime("%H:%M"),
-            })
+            if include_cierres:
+                bucket["cierres"].append({
+                    "tarjeta_id": event.tarjeta_id,
+                    "cliente": card.owner_name if card else None,
+                    "prioridad": priority,
+                    "hora": ensure_utc(event.changed_at).astimezone(BOGOTA).strftime("%H:%M"),
+                })
 
         if is_rework(event.old_status, event.new_status, order):
             bucket["retrabajo"] += 1
             if day_row:
                 day_row["retrabajo"] += 1
 
-        if event.new_status == "para_entregar":
-            durations = _status_durations(history_by_card.get(event.tarjeta_id, []), ensure_utc(event.changed_at))
-            diag_hours = durations.get("diagnosticada")
-            if diag_hours and diag_hours > 0:
-                bucket["_diag_hours"].append(diag_hours)
-
     for comment in comments_in_range:
         actor_id = comment.user_id or UNASSIGNED_KEY
         if tecnico_id and actor_id != tecnico_id:
             continue
         tech_bucket(actor_id, comment.author_name)["comentarios"] += 1
+
+    timing_ids = {card_id for card_id in closed_in_period} | {card_id for _, card_id, _ in repair_events}
+    history_by_card: dict[int, list[StatusHistory]] = defaultdict(list)
+    if timing_ids:
+        for event in (
+            db.query(StatusHistory)
+            .filter(StatusHistory.tarjeta_id.in_(timing_ids))
+            .order_by(StatusHistory.tarjeta_id.asc(), StatusHistory.changed_at.asc(), StatusHistory.id.asc())
+            .all()
+        ):
+            history_by_card[event.tarjeta_id].append(event)
+
+    for actor_id, card_id, repaired_at in repair_events:
+        durations = _status_durations(history_by_card.get(card_id, []), repaired_at)
+        diag_hours = durations.get("diagnosticada")
+        if diag_hours and diag_hours > 0:
+            tech_bucket(actor_id)["_diag_hours"].append(diag_hours)
 
     for card_id, (close_event, card) in closed_in_period.items():
         close_at = ensure_utc(close_event.changed_at)
@@ -374,30 +392,24 @@ def compute_desempeno(
         blocked = blocked_seconds(history, start_at, close_at)
         hours = max(raw_seconds - blocked, 0.0) / 3600
         actor_id = _actor_id(close_event, card)
-        if tecnico_id and actor_id != tecnico_id:
+        if tecnico_id and close_event.changed_by != tecnico_id:
             continue
         tech_bucket(actor_id, close_event.changed_by_name)["_cycle_hours"].append(hours)
         all_cycle_hours.append(hours)
 
-    wip_rows = (
-        db.query(RepairCard.assigned_to, RepairCard.id)
-        .filter(
-            RepairCard.deleted_at.is_(None),
-            RepairCard.status != "listos",
-            RepairCard.assigned_to.isnot(None),
-        )
-        .all()
+    wip_q = db.query(RepairCard.assigned_to, func.count(RepairCard.id)).filter(
+        RepairCard.deleted_at.is_(None),
+        RepairCard.status != "listos",
+        RepairCard.assigned_to.isnot(None),
     )
-    for assigned_to, _card_id in wip_rows:
-        if tecnico_id and assigned_to != tecnico_id:
-            continue
+    if tecnico_id:
+        wip_q = wip_q.filter(RepairCard.assigned_to == tecnico_id)
+    for assigned_to, count in wip_q.group_by(RepairCard.assigned_to).all():
         if assigned_to in techs:
-            techs[assigned_to]["carga_wip"] += 1
+            techs[assigned_to]["carga_wip"] = int(count or 0)
 
     tecnicos = []
-    for actor_id, bucket in techs.items():
-        if tecnico_id and actor_id != tecnico_id:
-            continue
+    for _, bucket in techs.items():
         cycle = bucket.pop("_cycle_hours")
         diag = bucket.pop("_diag_hours")
         bucket["tiempo_ciclo_mediana_horas"] = round_hours(cycle)
@@ -408,7 +420,7 @@ def compute_desempeno(
             round(bucket["con_notas_tecnicas"] / notas_total * 100, 1) if notas_total else None
         )
         bucket["muestra_pequena"] = bucket["entregadas"] + bucket["reparadas"] < 5
-        bucket["cierres"] = bucket["cierres"][:50]
+        bucket["cierres"] = bucket["cierres"][:50] if include_cierres else []
         tecnicos.append(bucket)
 
     tecnicos.sort(

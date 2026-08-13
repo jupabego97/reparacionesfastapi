@@ -214,8 +214,16 @@ class TestDesempenoEndpoint:
         assert tech_row["tasa_notas_tecnicas"] == 100.0
         assert data["resumen"]["entregadas"] == 1
         assert tech_row["tiempo_ciclo_mediana_horas"] == 6.0
-        assert len(tech_row["cierres"]) == 1
-        assert tech_row["cierres"][0]["cliente"] == "PC Gamer"
+        assert tech_row["cierres"] == []
+
+        detail = client.get(
+            f"/api/metricas/desempeno?fecha=2026-08-12&include_cierres=true&tecnico_id={tech.id}",
+            headers=auth_headers,
+        )
+        assert detail.status_code == 200
+        detail_row = next(item for item in detail.json()["tecnicos"] if item["id"] == tech.id)
+        assert len(detail_row["cierres"]) == 1
+        assert detail_row["cierres"][0]["cliente"] == "PC Gamer"
 
     def test_excludes_blocked_time_from_cycle(self, db_session, auth_headers, tech_user):
         _seed_columns(db_session)

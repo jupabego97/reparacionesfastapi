@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
-import DesempenoPanel from './DesempenoPanel';
+
+const DesempenoPanel = lazy(() => import('./DesempenoPanel'));
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
@@ -47,7 +48,9 @@ export default function EstadisticasModal({ onClose, initialTab = 'general' }: P
         </div>
         <div className="modal-pro-body">
           {tab === 'desempeno' ? (
-            <DesempenoPanel />
+            <Suspense fallback={<div className="app-loading"><div className="spinner-large"></div></div>}>
+              <DesempenoPanel />
+            </Suspense>
           ) : isLoading || !stats ? (
             <div className="app-loading"><div className="spinner-large"></div></div>
           ) : (
