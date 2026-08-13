@@ -2,7 +2,6 @@
 
 import asyncio
 import concurrent.futures
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -101,7 +100,7 @@ async def procesar_imagen(
             "telefono": str(result.get("telefono") or ""),
             "tiene_cargador": bool(result.get("tiene_cargador", False)),
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Timeout procesando imagen con Gemini")
         return _partial_ia_response(
             408,
@@ -136,7 +135,7 @@ async def transcribir_audio(
             timeout=GEMINI_TIMEOUT_SECONDS,
         )
         return {"transcripcion": transcripcion}
-    except asyncio.TimeoutError as err:
+    except TimeoutError as err:
         raise HTTPException(status_code=408, detail="Timeout procesando audio") from err
     except ClientError as e:
         code = int(getattr(e, "code", 400) or 400)
@@ -151,7 +150,7 @@ async def transcribir_audio(
 
 class ProcesarMultimediaBody(BaseModel):
     image: str = Field(..., min_length=1)
-    audio: Optional[str] = None
+    audio: str | None = None
 
 
 @router.post("/procesar-multimedia")
@@ -177,7 +176,7 @@ async def procesar_multimedia(
         try:
             resultado_imagen = await run_image()
             return {"imagen": resultado_imagen, "audio": {"error": "No se proporcionó audio"}}
-        except asyncio.TimeoutError as err:
+        except TimeoutError as err:
             raise HTTPException(status_code=408, detail="Timeout") from err
 
     def task_audio():
@@ -195,5 +194,5 @@ async def procesar_multimedia(
             timeout=GEMINI_TIMEOUT_SECONDS + 5,
         )
         return {"imagen": resultado_imagen, "audio": resultado_audio}
-    except asyncio.TimeoutError as err:
+    except TimeoutError as err:
         raise HTTPException(status_code=408, detail="Timeout") from err

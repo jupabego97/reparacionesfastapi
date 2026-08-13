@@ -1,11 +1,11 @@
 """Tests for card audit IP tracking."""
 import pytest
-from fastapi import Request
-from tests.conftest import client
-
 from app.models.kanban import KanbanColumn
 from app.models.repair_card import StatusHistory
 from app.services.audit_service import get_client_ip, is_valid_ip, record_card_audit
+from fastapi import Request
+
+from tests.conftest import client
 
 
 def _make_request(headers: dict | None = None, client_host: str = "127.0.0.1") -> Request:
