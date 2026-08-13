@@ -5,13 +5,16 @@ Optimizado: queries batch en vez de O(N*M), cálculos en DB en vez de Python.
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.cache import get_cached, set_cached
 from app.core.database import get_db
 from app.models.repair_card import RepairCard, StatusHistory
+from app.models.user import User
+from app.services.auth_service import get_current_user
+from app.services.desempeno_service import DateRangeError, compute_desempeno, resolve_date_range
 
 router = APIRouter(prefix="/api/metricas", tags=["metricas"])
 
@@ -302,6 +305,28 @@ def get_kanban_metrics(
 
     set_cached(cache_key, result, METRICAS_TTL)
     return result
+
+
+@router.get("/desempeno")
+def get_desempeno(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+    fecha: str | None = Query(None, description="Día único YYYY-MM-DD (horario Colombia)"),
+    desde: str | None = Query(None, description="Inicio de rango YYYY-MM-DD"),
+    hasta: str | None = Query(None, description="Fin de rango YYYY-MM-DD"),
+    tecnico_id: int | None = Query(None, ge=1, description="Filtrar un técnico"),
+):
+    """Desempeño por técnico, filtrable por día o rango en horario de Colombia."""
+    try:
+        start_day, end_day = resolve_date_range(fecha, desde, hasta)
+    except DateRangeError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return compute_desempeno(
+        db,
+        start_day=start_day,
+        end_day=end_day,
+        tecnico_id=tecnico_id,
+    )
 
 
 @router.get("/diario")
