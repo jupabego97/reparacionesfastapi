@@ -556,6 +556,7 @@ export const api = {
     if (params.desde) query.set('desde', params.desde);
     if (params.hasta) query.set('hasta', params.hasta);
     if (params.tecnico_id) query.set('tecnico_id', String(params.tecnico_id));
+    if (params.include_cierres) query.set('include_cierres', 'true');
     const suffix = query.toString();
     const res = await fetchWithAuth(`${API_BASE}/api/metricas/desempeno${suffix ? `?${suffix}` : ''}`, { headers: authHeaders() });
     await ensureOk(res);
@@ -845,6 +846,7 @@ export interface DesempenoQuery {
   desde?: string;
   hasta?: string;
   tecnico_id?: number;
+  include_cierres?: boolean;
 }
 
 export interface DesempenoCierre {
