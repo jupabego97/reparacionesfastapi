@@ -148,6 +148,7 @@ export default function App() {
   const [showNew, setShowNew] = useState(false);
   const [editCardId, setEditCardId] = useState<number | null>(null);
   const [showStats, setShowStats] = useState(false);
+  const [statsTab, setStatsTab] = useState<'general' | 'desempeno'>('general');
   const [showExport, setShowExport] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
 
@@ -758,8 +759,11 @@ export default function App() {
             </button>
             {showMoreMenu && (
               <div id="header-more-menu" className="header-more-menu" role="menu">
-                <button className="header-more-item" role="menuitem" onClick={() => { setShowStats(true); setShowMoreMenu(false); }}>
+                <button className="header-more-item" role="menuitem" onClick={() => { setStatsTab('general'); setShowStats(true); setShowMoreMenu(false); }}>
                   <i className="fas fa-chart-bar"></i> Estadisticas
+                </button>
+                <button className="header-more-item" role="menuitem" onClick={() => { setStatsTab('desempeno'); setShowStats(true); setShowMoreMenu(false); }}>
+                  <i className="fas fa-user-check"></i> Desempeño
                 </button>
                 <button className="header-more-item" role="menuitem" onClick={() => { setShowExport(true); setShowMoreMenu(false); }}>
                   <i className="fas fa-file-export"></i> Exportar
@@ -977,7 +981,7 @@ export default function App() {
             onClose={() => setEditCardId(null)}
           />
         )}
-        {showStats && <EstadisticasModal onClose={() => setShowStats(false)} />}
+        {showStats && <EstadisticasModal initialTab={statsTab} onClose={() => setShowStats(false)} />}
         {showExport && <ExportarModal onClose={() => setShowExport(false)} />}
       </Suspense>
 

@@ -550,6 +550,17 @@ export const api = {
     await ensureOk(res);
     return res.json();
   },
+  async getDesempeno(params: DesempenoQuery = {}): Promise<DesempenoMetrics> {
+    const query = new URLSearchParams();
+    if (params.fecha) query.set('fecha', params.fecha);
+    if (params.desde) query.set('desde', params.desde);
+    if (params.hasta) query.set('hasta', params.hasta);
+    if (params.tecnico_id) query.set('tecnico_id', String(params.tecnico_id));
+    const suffix = query.toString();
+    const res = await fetchWithAuth(`${API_BASE}/api/metricas/desempeno${suffix ? `?${suffix}` : ''}`, { headers: authHeaders() });
+    await ensureOk(res);
+    return res.json();
+  },
 
   // --- Columnas ---
   async getColumnas(): Promise<KanbanColumn[]> {
@@ -824,6 +835,77 @@ export const api = {
 };
 
 // New interfaces
+export interface DesempenoQuery {
+  fecha?: string;
+  desde?: string;
+  hasta?: string;
+  tecnico_id?: number;
+}
+
+export interface DesempenoCierre {
+  tarjeta_id: number;
+  cliente: string | null;
+  prioridad: string;
+  hora: string;
+}
+
+export interface DesempenoTecnico {
+  id: number | null;
+  nombre: string;
+  rol: string;
+  avatar_color: string | null;
+  diagnosticadas: number;
+  reparadas: number;
+  entregadas: number;
+  retrabajo: number;
+  bloqueos: number;
+  desbloqueos: number;
+  movimientos: number;
+  comentarios: number;
+  con_notas_tecnicas: number;
+  sin_notas_tecnicas: number;
+  carga_wip: number;
+  valor_cobrado: number;
+  por_prioridad: { alta: number; media: number; baja: number };
+  tiempo_ciclo_mediana_horas: number | null;
+  tiempo_ciclo_p90_horas: number | null;
+  tiempo_diagnostico_mediana_horas: number | null;
+  tasa_notas_tecnicas: number | null;
+  muestra_pequena: boolean;
+  cierres: DesempenoCierre[];
+}
+
+export interface DesempenoDia {
+  fecha: string;
+  diagnosticadas: number;
+  reparadas: number;
+  entregadas: number;
+  retrabajo: number;
+  bloqueos: number;
+}
+
+export interface DesempenoMetrics {
+  zona: string;
+  desde: string;
+  hasta: string;
+  dias: number;
+  tecnico_id: number | null;
+  resumen: {
+    diagnosticadas: number;
+    reparadas: number;
+    entregadas: number;
+    retrabajo: number;
+    bloqueos: number;
+    comentarios: number;
+    tiempo_ciclo_mediana_horas: number | null;
+    tasa_notas_tecnicas: number | null;
+  };
+  tecnicos: DesempenoTecnico[];
+  por_dia: DesempenoDia[];
+  generado_at: string;
+  criterios: Record<string, string>;
+}
+
 export interface KanbanMetrics {
   cycle_time: { promedio_dias: number; total_completadas: number; detalle: { id: number; nombre: string; dias: number }[] };
   lead_time_por_etapa: Record<string, number>;
