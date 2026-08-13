@@ -2,6 +2,7 @@
 from datetime import UTC, datetime, timedelta
 
 from app.models.repair_card import RepairCard
+
 from tests.conftest import client
 
 

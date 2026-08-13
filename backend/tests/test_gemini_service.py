@@ -2,12 +2,10 @@
 
 import base64
 
-import pytest
-from google.genai.errors import ClientError, ServerError
-
 from app.api.routes.multimedia import _gemini_error_status
 from app.services import gemini_service
 from app.services.gemini_service import ClientInfo, _parse_client_info, get_gemini_service
+from google.genai.errors import ClientError, ServerError
 
 
 def test_get_gemini_service_without_api_key(monkeypatch):
