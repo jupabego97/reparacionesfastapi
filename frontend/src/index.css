@@ -4356,6 +4356,174 @@ body {
   }
 }
 
+
+/* ==================== Desempeño diario del taller ==================== */
+.desempeno-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.desempeno-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.desempeno-alert {
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.desempeno-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.desempeno-kpi {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.desempeno-kpi-actionable {
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.desempeno-kpi-actionable:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 172, 193, 0.15);
+}
+
+.desempeno-kpi-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.desempeno-kpi-top i {
+  color: var(--accent);
+}
+
+.desempeno-kpi-value {
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.desempeno-kpi-deltas {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.45rem;
+  font-size: 0.7rem;
+}
+
+.desempeno-kpi-deltas .delta.up { color: #22c55e; }
+.desempeno-kpi-deltas .delta.down { color: #ef4444; }
+.desempeno-kpi-deltas .delta.flat { color: var(--text-muted); }
+
+.desempeno-kpi-hint,
+.desempeno-kpi-link {
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.desempeno-kpi-link {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.desempeno-sections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.desempeno-section {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem;
+}
+
+.desempeno-section h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+}
+
+.desempeno-wip-row,
+.desempeno-tech-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.desempeno-wip-row:last-child,
+.desempeno-tech-row:last-child {
+  border-bottom: none;
+}
+
+.desempeno-wip-row.total {
+  margin-top: 0.25rem;
+  font-weight: 700;
+}
+
+.desempeno-tech-row .tech-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desempeno-tech-row .tech-count {
+  font-weight: 700;
+  min-width: 2rem;
+  text-align: right;
+}
+
+.desempeno-tech-row .tech-money {
+  color: var(--text-muted);
+  min-width: 4.5rem;
+  text-align: right;
+}
+
+.desempeno-error {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+@media (max-width: 768px) {
+  .desempeno-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==================== Desempeño por técnico ==================== */
 .desempeno-panel {
   display: flex;
   flex-direction: column;
@@ -4408,17 +4576,13 @@ body {
   gap: 0.6rem;
 }
 
-.desempeno-kpi {
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+.desempeno-panel .desempeno-kpi {
   padding: 0.85rem 0.7rem;
   text-align: center;
 }
 
-.desempeno-kpi-value {
+.desempeno-panel .desempeno-kpi-value {
   font-size: 1.25rem;
-  font-weight: 800;
 }
 
 .desempeno-kpi-label {
@@ -4427,9 +4591,9 @@ body {
   margin-top: 0.15rem;
 }
 
-.desempeno-kpi-hint {
+.desempeno-panel .desempeno-kpi-hint {
   font-size: 0.65rem;
-  color: var(--text-muted);
+  margin-top: 0;
 }
 
 .desempeno-card {
@@ -4478,7 +4642,7 @@ body {
   background: var(--accent-light);
 }
 
-.desempeno-tech {
+.desempeno-panel .desempeno-tech {
   display: flex;
   align-items: center;
   gap: 0.5rem;

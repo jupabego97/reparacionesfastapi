@@ -28,3 +28,8 @@ def invalidate_stats() -> None:
     with _lock:
         if STATS_KEY in _cache:
             del _cache[STATS_KEY]
+
+
+def clear_cache() -> None:
+    with _lock:
+        _cache.clear()

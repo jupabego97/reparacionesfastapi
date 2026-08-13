@@ -42,7 +42,7 @@ export default function EstadisticasModal({ onClose, initialTab = 'general' }: P
             <i className="fas fa-chart-pie"></i> General
           </button>
           <button className={`modal-tab ${tab === 'desempeno' ? 'active' : ''}`} onClick={() => setTab('desempeno')}>
-            <i className="fas fa-user-check"></i> Desempeño
+            <i className="fas fa-user-check"></i> Técnicos
           </button>
         </div>
         <div className="modal-pro-body">

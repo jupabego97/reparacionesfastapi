@@ -800,6 +800,11 @@ export const api = {
     await ensureOk(res);
     return res.json();
   },
+  async getDailyMetrics(): Promise<DailyMetrics> {
+    const res = await fetchWithAuth(`${API_BASE}/api/metricas/diario`, { headers: authHeaders() });
+    await ensureOk(res);
+    return res.json();
+  },
 
   // --- Activity feed ---
   async getActivityFeed(limit = 50, offset = 0, tarjetaId?: number): Promise<{ actividad: ActivityItem[]; total: number }> {
@@ -913,6 +918,39 @@ export interface KanbanMetrics {
   cfd: Record<string, string | number>[];
   sla_violations: { tarjeta_id: number; nombre: string; columna: string; horas_en_columna: number; sla_horas: number }[];
   blocked_count: number;
+}
+
+export interface DailyMetrics {
+  fecha: string;
+  timezone: string;
+  hoy: {
+    ingresos: number;
+    entregas: number;
+    balance: number;
+    bloqueadas: number;
+    fuera_sla: number;
+    cobrado: number;
+    pendientes: number;
+  };
+  ayer: {
+    ingresos: number;
+    entregas: number;
+    cobrado: number;
+  };
+  promedio_7d: {
+    ingresos: number;
+    entregas: number;
+    cobrado: number;
+  };
+  wip_por_columna: Record<string, number>;
+  por_tecnico_7d: Array<{
+    id: number | null;
+    nombre: string;
+    entregadas: number;
+    cobrado: number;
+  }>;
+  alertas: string[];
+  generado_at: string;
 }
 
 export interface HistorialEntry {

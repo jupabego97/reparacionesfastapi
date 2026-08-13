@@ -33,8 +33,11 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def reset_db():
     """Drop and recreate all tables between tests for isolation."""
+    from app.core.cache import clear_cache
+
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    clear_cache()
     yield
 
 
