@@ -3,13 +3,39 @@ from functools import lru_cache
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
+# Proveedores que el SDK actual (google-genai) puede atender sin dependencias extra.
+SUPPORTED_AI_PROVIDERS = frozenset({"gemini", "vertexai"})
+_DEFAULT_AI_PROVIDER = "gemini"
+_DEFAULT_AI_MODEL = "gemini-3.5-flash"
+_GEMINI_PROVIDER_ALIASES = frozenset(
+    {"", "gemini", "google", "google-ai", "google_ai", "gemini-api"}
+)
+_VERTEX_PROVIDER_ALIASES = frozenset({"vertexai", "vertex_ai", "vertex-ai", "vertex"})
+
+
+def normalize_ai_provider(value: str | None) -> str:
+    """Normaliza el proveedor de IA leído de entorno. No valida soporte."""
+    raw = (value or _DEFAULT_AI_PROVIDER).strip().lower()
+    if raw in _VERTEX_PROVIDER_ALIASES:
+        return "vertexai"
+    if raw in _GEMINI_PROVIDER_ALIASES:
+        return "gemini"
+    return raw
+
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./reparaciones.db"
     environment: str = "development"
     allowed_origins: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
+    ai_provider: str = Field(
+        default=_DEFAULT_AI_PROVIDER,
+        validation_alias=AliasChoices("AI_PROVIDER", "GEMINI_PROVIDER"),
+    )
+    gemini_model: str = Field(
+        default=_DEFAULT_AI_MODEL,
+        validation_alias=AliasChoices("GEMINI_MODEL", "AI_MODEL"),
+    )
     socketio_safe_mode: bool = False
     redis_url: str | None = None
 
@@ -49,6 +75,16 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        populate_by_name = True
+
+    @property
+    def resolved_ai_provider(self) -> str:
+        return normalize_ai_provider(self.ai_provider)
+
+    @property
+    def resolved_ai_model(self) -> str:
+        model = (self.gemini_model or "").strip()
+        return model or _DEFAULT_AI_MODEL
 
     @property
     def is_production(self) -> bool:

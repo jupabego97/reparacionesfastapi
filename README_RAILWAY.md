@@ -33,6 +33,8 @@ Este proyecto está preparado para desplegarse en Railway con **3 servicios sepa
    - `JWT_SECRET` = **secreto largo y aleatorio** (obligatorio). Si falta o queda el valor por defecto, la app **no arranca** en producción.
    - `ALLOWED_ORIGINS` = **URL exacta del frontend** (ej: `https://just-wisdom-production-d465.up.railway.app`). Sin esta variable, CORS bloqueará Socket.IO y la API desde otro dominio.
    - `GEMINI_API_KEY` = *(opcional)*
+   - `AI_PROVIDER` = `gemini` *(opcional; `gemini` o `vertexai`)*
+   - `GEMINI_MODEL` = `gemini-3.5-flash` *(opcional; alias `AI_MODEL`)*
    - `SOCKETIO_SAFE_MODE` = `1`
 4. **Settings** → **Networking** → **Generate Domain** para obtener la URL pública del backend (ej: `https://reparacionesfastapi-backend.up.railway.app`)
 
@@ -78,6 +80,8 @@ cd backend && python -m alembic upgrade head
 | Backend    | JWT_SECRET       | Secreto fuerte (obligatorio en producción)                 |
 | Backend    | ALLOWED_ORIGINS  | URL exacta del frontend (ej: `https://just-wisdom-production-d465.up.railway.app`). **Obligatorio** para CORS cross-origin |
 | Backend    | GEMINI_API_KEY   | *(opcional)*                                               |
+| Backend    | AI_PROVIDER      | `gemini` o `vertexai` *(opcional; default `gemini`)*       |
+| Backend    | GEMINI_MODEL / AI_MODEL | `gemini-3.5-flash` *(opcional)*                       |
 | Backend    | SOCKETIO_SAFE_MODE | `1`                                                      |
 | Frontend   | VITE_API_URL     | `https://reparacionesfastapi-backend.up.railway.app`      |
 

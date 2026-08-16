@@ -1,4 +1,8 @@
-"""Servicio de IA con Google Gemini (SDK google-genai + generateContent API)."""
+"""Servicio de IA (SDK google-genai + generateContent API).
+
+Proveedor y modelo se leen de entorno: AI_PROVIDER / GEMINI_PROVIDER y
+AI_MODEL / GEMINI_MODEL. Por defecto: gemini + gemini-3.5-flash.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.core.config import get_settings
+from app.core.config import SUPPORTED_AI_PROVIDERS, get_settings, normalize_ai_provider
 
 PROMPT_EXTRACT_INFO = """Analiza esta imagen de un taller de reparacion y extrae:
 - nombre: nombre del cliente en etiqueta o nota (default "Cliente")
@@ -31,16 +35,32 @@ class ClientInfo(BaseModel):
     tiene_cargador: bool = Field(default=False, description="True si hay cargador/cable USB visible")
 
 
+def _has_gemini_api_key(api_key: str) -> bool:
+    return bool(api_key) and api_key != "your_gemini_api_key_here"
+
+
 def get_gemini_service() -> GeminiService | None:
     global _gemini_instance
     if _gemini_instance is not None:
         return _gemini_instance
     settings = get_settings()
+    provider = settings.resolved_ai_provider
+    if provider not in SUPPORTED_AI_PROVIDERS:
+        logger.warning(
+            f"Proveedor de IA no soportado: {settings.ai_provider!r}. "
+            "Use AI_PROVIDER=gemini o AI_PROVIDER=vertexai."
+        )
+        return None
     api_key = (settings.gemini_api_key or "").strip()
-    if not api_key or api_key == "your_gemini_api_key_here":
+    # Gemini Developer API exige clave. Vertex AI usa ADC / variables de GCP.
+    if provider == "gemini" and not _has_gemini_api_key(api_key):
         return None
     try:
-        _gemini_instance = GeminiService(api_key, model=settings.gemini_model)
+        _gemini_instance = GeminiService(
+            api_key,
+            model=settings.resolved_ai_model,
+            provider=provider,
+        )
         return _gemini_instance
     except Exception as e:
         logger.warning(f"Gemini no disponible: {e}")
@@ -121,14 +141,21 @@ def _client_info_from_response(response: Any) -> dict[str, Any]:
 
 
 class GeminiService:
-    def __init__(self, api_key: str, model: str | None = None):
+    def __init__(self, api_key: str, model: str | None = None, provider: str | None = None):
         from google import genai
         from google.genai import types
 
-        self._client = genai.Client(api_key=api_key)
-        self._types = types
         settings = get_settings()
-        self.model = (model or settings.gemini_model or "gemini-3.5-flash").strip()
+        self.provider = normalize_ai_provider(provider or settings.ai_provider)
+        self.model = (model or settings.resolved_ai_model or "gemini-3.5-flash").strip()
+        if self.provider not in SUPPORTED_AI_PROVIDERS:
+            raise ValueError(f"Proveedor de IA no soportado: {self.provider}")
+        self._types = types
+        if self.provider == "vertexai":
+            self._client = genai.Client(vertexai=True)
+        else:
+            self._client = genai.Client(api_key=api_key)
+        logger.info(f"Servicio de IA listo (provider={self.provider}, model={self.model})")
 
     def _extract_config(self) -> Any:
         return self._types.GenerateContentConfig(
