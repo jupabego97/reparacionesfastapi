@@ -19,6 +19,10 @@ pip install -r requirements.txt
 # JWT_SECRET=<secreto fuerte>
 # ALLOW_PUBLIC_REGISTER=false
 # RUNTIME_SCHEMA_MIGRATION=false
+# IA (opcionales; por defecto Gemini + gemini-3.5-flash):
+# AI_PROVIDER=gemini
+# GEMINI_MODEL=gemini-3.5-flash
+# (alias: GEMINI_PROVIDER, AI_MODEL)
 python -m alembic upgrade head   # Crear tablas
 python run.py                    # o: uvicorn app.socket_app:socket_app --reload
 ```
