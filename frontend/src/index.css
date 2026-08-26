@@ -1568,6 +1568,11 @@ body {
   color: var(--danger);
 }
 
+.field-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted, #64748b);
+}
+
 .form-advanced-accordion {
   margin-top: 1rem;
   border: 1px solid var(--border);
