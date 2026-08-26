@@ -21,8 +21,8 @@ function adjustColumnTotals(
 ): Record<string, number> | undefined {
   if (!totals || !delta) return totals;
   const next = { ...totals };
-  if (fromCol && fromCol in next) next[fromCol] = Math.max(0, (next[fromCol] || 0) + delta);
-  if (toCol && toCol !== fromCol && toCol in next) next[toCol] = Math.max(0, (next[toCol] || 0) - delta);
+  if (fromCol) next[fromCol] = Math.max(0, (next[fromCol] || 0) - delta);
+  if (toCol && toCol !== fromCol) next[toCol] = Math.max(0, (next[toCol] || 0) + delta);
   return next;
 }
 
@@ -123,6 +123,18 @@ export function applyReorderPatch(
         .filter((t): t is TarjetaBoardItem => t !== null),
     })),
   };
+}
+
+const localUpdateAt = new Map<number, number>();
+const LOCAL_UPDATE_WINDOW_MS = 2500;
+
+export function markLocalCardUpdate(id: number): void {
+  localUpdateAt.set(id, Date.now());
+}
+
+export function wasRecentLocalCardUpdate(id: number, windowMs = LOCAL_UPDATE_WINDOW_MS): boolean {
+  const ts = localUpdateAt.get(id);
+  return ts != null && Date.now() - ts <= windowMs;
 }
 
 export function applyActivityPatch(

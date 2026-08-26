@@ -1,15 +1,18 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem, KanbanColumn, HistorialEntry } from '../api/client';
+import type { TarjetaBoardItem, TarjetaDetail, SubTask, CommentItem, Tag, UserInfo, TarjetaUpdate, TarjetaMediaItem, KanbanColumn, HistorialEntry, KanbanRules } from '../api/client';
 import { formatAuditAction, formatAuditDetails } from '../utils/auditLabels';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
+import { applyCardPatch, markLocalCardUpdate, type BoardInfiniteData } from '../utils/boardCache';
+import { canMoveToColumn, type BoardFilters } from '../utils/boardMoves';
 import ConfirmModal from './ConfirmModal';
 
 interface Props {
   tarjetaId: number;
   onClose: () => void;
   remoteEditRevision?: number;
+  boardFilters?: BoardFilters;
 }
 
 type TabKey = 'info' | 'subtasks' | 'comments' | 'history' | 'photos';
@@ -20,13 +23,17 @@ const PRIORIDADES = [
   { value: 'baja', label: 'Baja', color: '#22c55e' },
 ];
 
-export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevision = 0 }: Props) {
+export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevision = 0, boardFilters }: Props) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('info');
   const [showDelete, setShowDelete] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [remoteConflictDismissed, setRemoteConflictDismissed] = useState(0);
+  const [hydrateNonce, setHydrateNonce] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusError, setStatusError] = useState('');
+  const hydratedFor = useRef<{ id: number; nonce: number } | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const showRemoteConflict = remoteEditRevision > remoteConflictDismissed;
 
@@ -71,33 +78,54 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
   const [photoError, setPhotoError] = useState('');
 
   useEffect(() => {
-    if (!tarjeta) return;
+    setStatusError('');
+    setStatusSaving(false);
+  }, [tarjetaId]);
+
+  const applyTarjetaToForm = (t: TarjetaDetail) => {
     setForm({
-      nombre_propietario: tarjeta.nombre_propietario || '',
-      problema: tarjeta.problema || '',
-      whatsapp: tarjeta.whatsapp || '',
-      fecha_limite: tarjeta.fecha_limite || '',
-      tiene_cargador: tarjeta.tiene_cargador || 'si',
-      notas_tecnicas: tarjeta.notas_tecnicas || '',
-      prioridad: tarjeta.prioridad || 'media',
-      columna: tarjeta.columna || '',
-      asignado_a: tarjeta.asignado_a ?? '',
-      costo_estimado: tarjeta.costo_estimado ?? '',
-      costo_final: tarjeta.costo_final ?? '',
-      notas_costo: tarjeta.notas_costo || '',
+      nombre_propietario: t.nombre_propietario || '',
+      problema: t.problema || '',
+      whatsapp: t.whatsapp || '',
+      fecha_limite: t.fecha_limite || '',
+      tiene_cargador: t.tiene_cargador || 'si',
+      notas_tecnicas: t.notas_tecnicas || '',
+      prioridad: t.prioridad || 'media',
+      columna: t.columna || '',
+      asignado_a: t.asignado_a ?? '',
+      costo_estimado: t.costo_estimado ?? '',
+      costo_final: t.costo_final ?? '',
+      notas_costo: t.notas_costo || '',
     });
-    setSelectedTags(tarjeta.tags?.map(t => t.id) || []);
-  }, [tarjeta]);
+    setSelectedTags(t.tags?.map(tag => tag.id) || []);
+  };
+
+  useEffect(() => {
+    if (!tarjeta) return;
+    const already = hydratedFor.current;
+    if (already && already.id === tarjetaId && already.nonce === hydrateNonce) return;
+    hydratedFor.current = { id: tarjetaId, nonce: hydrateNonce };
+    applyTarjetaToForm(tarjeta);
+  }, [tarjeta, tarjetaId, hydrateNonce]);
 
   // Global data — uses staleTime so App-level cache is reused (no redundant fetches)
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: api.getTags, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: api.getUsers, staleTime: 5 * 60_000 });
   const { data: columnas = [] } = useQuery<KanbanColumn[]>({ queryKey: ['columnas'], queryFn: api.getColumnas, staleTime: 5 * 60_000 });
+  const { data: kanbanRules } = useQuery<KanbanRules>({ queryKey: ['kanban-rules'], queryFn: api.getKanbanRules, staleTime: 5 * 60_000 });
   const colTitleMap = useMemo(() => {
     const map: Record<string, string> = {};
     columnas.forEach(c => { map[c.key] = c.title; });
     return map;
   }, [columnas]);
+
+  const syncCardToCaches = useCallback((updated: TarjetaBoardItem) => {
+    markLocalCardUpdate(updated.id);
+    qc.setQueryData<TarjetaDetail>(['tarjeta-detail', tarjetaId], current => (
+      current ? { ...current, ...updated } : updated as TarjetaDetail
+    ));
+    qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, updated, boardFilters));
+  }, [qc, tarjetaId, boardFilters]);
 
   // Card-specific data — only fetch when the relevant tab is active
   const { data: subtasks = [], refetch: refetchSubtasks } = useQuery({
@@ -120,8 +148,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
   const updateMut = useMutation({
     mutationFn: (data: TarjetaUpdate) => api.updateTarjeta(tarjetaId, data),
     onSuccess: (updated) => {
-      qc.setQueryData(['tarjeta-detail', tarjetaId], updated);
-      qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+      syncCardToCaches(updated);
       onClose();
     },
   });
@@ -174,22 +201,61 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
   const handleSave = async () => {
     if (showRemoteConflict) return;
     setSaving(true);
-    await updateMut.mutateAsync({
-      nombre_propietario: form.nombre_propietario,
-      problema: form.problema,
-      whatsapp: form.whatsapp,
-      fecha_limite: form.fecha_limite,
-      tiene_cargador: form.tiene_cargador,
-      notas_tecnicas: form.notas_tecnicas,
-      prioridad: form.prioridad,
-      columna: form.columna || undefined,
-      asignado_a: form.asignado_a ? Number(form.asignado_a) : null,
-      costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : null,
-      costo_final: form.costo_final ? Number(form.costo_final) : null,
-      notas_costo: form.notas_costo || null,
-      tags: selectedTags,
-    });
-    setSaving(false);
+    try {
+      await updateMut.mutateAsync({
+        nombre_propietario: form.nombre_propietario,
+        problema: form.problema,
+        whatsapp: form.whatsapp,
+        fecha_limite: form.fecha_limite,
+        tiene_cargador: form.tiene_cargador,
+        notas_tecnicas: form.notas_tecnicas,
+        prioridad: form.prioridad,
+        asignado_a: form.asignado_a ? Number(form.asignado_a) : null,
+        costo_estimado: form.costo_estimado ? Number(form.costo_estimado) : null,
+        costo_final: form.costo_final ? Number(form.costo_final) : null,
+        notas_costo: form.notas_costo || null,
+        tags: selectedTags,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const columnCount = (col: string) => {
+    const entries = qc.getQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] });
+    for (const [, data] of entries) {
+      const totals = data?.pages?.find(page => page.column_totals)?.column_totals;
+      if (totals && totals[col] != null) return totals[col];
+    }
+    return 0;
+  };
+
+  const handleColumnaChange = async (nextCol: string) => {
+    if (!tarjeta || nextCol === form.columna || statusSaving) return;
+    const reason = canMoveToColumn(tarjeta, nextCol, columnas, columnCount(nextCol), kanbanRules);
+    if (reason) {
+      setStatusError(reason);
+      return;
+    }
+
+    const previous = tarjeta;
+    setStatusError('');
+    setForm(f => ({ ...f, columna: nextCol }));
+    setStatusSaving(true);
+    void qc.cancelQueries({ queryKey: ['tarjetas-board'] });
+    syncCardToCaches({ ...tarjeta, columna: nextCol, dias_en_columna: 0 });
+
+    try {
+      const updated = await api.updateTarjeta(tarjetaId, { columna: nextCol });
+      syncCardToCaches(updated);
+      void qc.invalidateQueries({ queryKey: ['historial', tarjetaId] });
+    } catch (err) {
+      setForm(f => ({ ...f, columna: previous.columna }));
+      syncCardToCaches(previous);
+      setStatusError(err instanceof Error ? err.message : 'No se pudo cambiar el estado');
+    } finally {
+      setStatusSaving(false);
+    }
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -240,13 +306,14 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
     onClose();
   };
 
-  const reloadRemote = () => {
+  const reloadRemote = async () => {
     setRemoteConflictDismissed(remoteEditRevision);
-    void qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
+    await qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
     void qc.invalidateQueries({ queryKey: ['subtasks', tarjetaId] });
     void qc.invalidateQueries({ queryKey: ['comments', tarjetaId] });
     void qc.invalidateQueries({ queryKey: ['historial', tarjetaId] });
     void qc.invalidateQueries({ queryKey: ['media', tarjetaId] });
+    setHydrateNonce(n => n + 1);
   };
 
   return (
@@ -320,9 +387,17 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
                     <div className="form-row">
                       <div className="form-group">
                         <label><i className="fas fa-columns"></i> Columna / Estado</label>
-                        <select value={form.columna} onChange={e => setForm({ ...form, columna: e.target.value })}>
+                        <select
+                          value={form.columna}
+                          className={statusError ? 'error' : undefined}
+                          disabled={statusSaving || !!tarjeta.bloqueada}
+                          onChange={e => { void handleColumnaChange(e.target.value); }}
+                          aria-busy={statusSaving}
+                        >
                           {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
                         </select>
+                        {statusSaving && <span className="field-hint"><i className="fas fa-spinner fa-spin"></i> Actualizando estado…</span>}
+                        {statusError && <span className="field-error">{statusError}</span>}
                       </div>
                       <div className="form-group">
                         <label><i className="fas fa-flag"></i> Prioridad</label>
@@ -393,18 +468,16 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
                       {tarjeta.bloqueada ? (
                         <button type="button" className="btn-save" style={{ background: '#22c55e' }}
                           onClick={async () => {
-                            await api.unblockTarjeta(tarjetaId);
-                            qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
-                            qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+                            const updated = await api.unblockTarjeta(tarjetaId);
+                            syncCardToCaches(updated);
                           }}>
                           <i className="fas fa-lock-open"></i> Desbloquear tarjeta
                         </button>
                       ) : (
                         <button type="button" className="btn-save" style={{ background: '#ef4444' }}
                           onClick={async () => {
-                            await api.blockTarjeta(tarjetaId, 'Bloqueo manual');
-                            qc.invalidateQueries({ queryKey: ['tarjeta-detail', tarjetaId] });
-                            qc.invalidateQueries({ queryKey: ['tarjetas-board'] });
+                            const updated = await api.blockTarjeta(tarjetaId, 'Bloqueo manual');
+                            syncCardToCaches(updated);
                           }}>
                           <i className="fas fa-lock"></i> Bloquear tarjeta
                         </button>
@@ -538,7 +611,7 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
                 </button>
                 <div className="footer-right">
                   <button className="btn-cancel" onClick={onClose}>Cancelar</button>
-                  <button className="btn-save" onClick={handleSave} disabled={saving}>
+                  <button className="btn-save" onClick={handleSave} disabled={saving || statusSaving || showRemoteConflict}>
                     {saving ? <><i className="fas fa-spinner fa-spin"></i> Guardando...</> : <><i className="fas fa-check"></i> Guardar</>}
                   </button>
                 </div>

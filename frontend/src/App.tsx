@@ -22,6 +22,7 @@ import {
   applyCardPatch,
   applyReorderPatch,
   removeCardPatch,
+  wasRecentLocalCardUpdate,
   type BoardInfiniteData,
   type ReorderItem,
 } from './utils/boardCache';
@@ -538,7 +539,9 @@ export default function App() {
       const filters = boardFiltersRef.current;
       qc.setQueriesData<BoardInfiniteData>({ queryKey: ['tarjetas-board'] }, old => applyCardPatch(old, card, filters));
       if (editCardIdRef.current === card.id) {
-        setRemoteEditRevision(v => v + 1);
+        if (!wasRecentLocalCardUpdate(card.id)) {
+          setRemoteEditRevision(v => v + 1);
+        }
       } else {
         pulseCard(card.id);
       }
@@ -985,6 +988,7 @@ export default function App() {
           <EditarTarjetaModal
             tarjetaId={editCardId}
             remoteEditRevision={remoteEditRevision}
+            boardFilters={activeBoardFilters}
             onClose={() => setEditCardId(null)}
           />
         )}
