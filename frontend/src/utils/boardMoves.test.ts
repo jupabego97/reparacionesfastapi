@@ -54,6 +54,12 @@ describe('boardMoves', () => {
     expect(reason).toMatch(/WIP/i);
   });
 
+  it('canMoveToColumn treats wip_limit 0 as unlimited (same as the API)', () => {
+    const c = card({ id: 1, columna: 'ingresado', posicion: 0 });
+    const columnas = [{ key: 'diagnosticada', title: 'Diag', color: '#000', icon: 'x', position: 1, wip_limit: 0 }];
+    expect(canMoveToColumn(c, 'diagnosticada', columnas as never, 4, undefined)).toBeNull();
+  });
+
   it('canMoveToColumn blocks disallowed transitions', () => {
     const c = card({ id: 1, columna: 'ingresado', posicion: 0 });
     const columnas = [

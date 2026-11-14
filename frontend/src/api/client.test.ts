@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { parseApiError, ApiError } from './client';
+import { parseApiError, ApiError, resolveApiBase } from './client';
+
+describe('resolveApiBase', () => {
+  it('prefers the runtime URL over the Vite bake', () => {
+    expect(resolveApiBase('https://api.up.railway.app/', 'https://stale.example')).toBe('https://api.up.railway.app');
+  });
+
+  it('falls back to the baked URL and strips a trailing slash', () => {
+    expect(resolveApiBase('', 'https://api.example.com/')).toBe('https://api.example.com');
+  });
+
+  it('returns empty when neither is set (dev proxy)', () => {
+    expect(resolveApiBase(undefined, undefined)).toBe('');
+  });
+});
 
 describe('parseApiError', () => {
   it('parses envelope payload', async () => {

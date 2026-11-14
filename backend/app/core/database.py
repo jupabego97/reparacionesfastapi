@@ -5,11 +5,22 @@ from sqlalchemy.pool import StaticPool
 from .config import get_settings
 
 
+def normalize_database_url(url: str) -> str:
+    """Railway entrega `postgres://`. SQLAlchemy 2.1 trata `postgresql://` como psycopg3.
+
+    Este proyecto instala psycopg2-binary, así que fijamos ese dialecto salvo que
+    la URL ya declare otro (`postgresql+psycopg://`, `postgresql+asyncpg://`, …).
+    """
+    raw = (url or "").strip()
+    if raw.startswith("postgres://"):
+        raw = "postgresql://" + raw[len("postgres://"):]
+    if raw.startswith("postgresql://"):
+        raw = "postgresql+psycopg2://" + raw[len("postgresql://"):]
+    return raw
+
+
 def get_database_url() -> str:
-    url = get_settings().database_url
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    return url
+    return normalize_database_url(get_settings().database_url)
 
 
 def create_db_engine():

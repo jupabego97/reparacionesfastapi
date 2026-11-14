@@ -31,6 +31,10 @@ module = [
   "app.api.routes.tarjetas",
   "app.api.routes.metricas",
   "app.api.routes.estadisticas",
+  "app.api.routes.exportar",
+  "app.api.routes.actividad",
   "app.services.notification_service",
+  "app.services.desempeno_service",
+  "app.services.gemini_service",
 ]
 ignore_errors = true
