@@ -253,20 +253,9 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
     }
 
     const previous = tarjeta;
-    const optimistic = {
-      ...cardFromForm,
-      columna: nextCol,
-      dias_en_columna: 0,
-    };
-    setStatusError('');
-    setForm(f => ({ ...f, columna: nextCol }));
-    setStatusSaving(true);
-    void qc.cancelQueries({ queryKey: ['tarjetas-board'] });
-    syncCardToCaches(optimistic);
-
     const payload: TarjetaUpdate = { columna: nextCol };
     const required = kanbanRules?.transition_requirements?.[nextCol] || [];
-    if (required.includes('asignado_a')) payload.asignado_a = optimistic.asignado_a;
+    if (required.includes('asignado_a')) payload.asignado_a = cardFromForm.asignado_a;
     if (required.includes('notas_tecnicas')) payload.notas_tecnicas = form.notas_tecnicas || '';
     if (required.includes('problema')) payload.problema = form.problema;
     if (required.includes('whatsapp')) payload.whatsapp = form.whatsapp;
@@ -274,6 +263,24 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
     if (required.includes('costo_estimado')) {
       payload.costo_estimado = form.costo_estimado === '' ? null : Number(form.costo_estimado);
     }
+    // Solo los campos del PUT entran al cache; el resto del form sigue dirty.
+    const optimistic = {
+      ...tarjeta,
+      columna: nextCol,
+      dias_en_columna: 0,
+      ...(payload.asignado_a !== undefined ? { asignado_a: payload.asignado_a } : {}),
+      ...(payload.notas_tecnicas !== undefined ? { notas_tecnicas: payload.notas_tecnicas } : {}),
+      ...(payload.problema !== undefined ? { problema: payload.problema } : {}),
+      ...(payload.whatsapp !== undefined ? { whatsapp: payload.whatsapp } : {}),
+      ...(payload.nombre_propietario !== undefined ? { nombre_propietario: payload.nombre_propietario } : {}),
+      ...(payload.costo_estimado !== undefined ? { costo_estimado: payload.costo_estimado } : {}),
+    };
+
+    setStatusError('');
+    setForm(f => ({ ...f, columna: nextCol }));
+    setStatusSaving(true);
+    void qc.cancelQueries({ queryKey: ['tarjetas-board'] });
+    syncCardToCaches(optimistic);
 
     try {
       const updated = await api.updateTarjeta(tarjetaId, payload);
