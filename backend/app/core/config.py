@@ -1,7 +1,34 @@
+import re
 from functools import lru_cache
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
+
+# Dominios públicos de Railway (con y sin el infijo `.up.`).
+RAILWAY_ORIGIN_REGEX = r"^https://[\w.-]+\.(up\.)?railway\.app$"
+
+
+def normalize_allowed_origins(raw: str | None) -> list[str]:
+    """Separa ALLOWED_ORIGINS por coma y quita barras finales que rompen CORS."""
+    return [item.strip().rstrip("/") for item in (raw or "").split(",") if item.strip()]
+
+
+def origin_is_allowed(
+    origin: str | None,
+    origins: list[str] | str,
+    origin_regex: str | None,
+) -> bool:
+    """True si el Origin del browser puede hablar con la API / Socket.IO."""
+    if not origin:
+        return False
+    if origins == "*":
+        return True
+    cleaned = origin.rstrip("/")
+    if isinstance(origins, list) and cleaned in origins:
+        return True
+    if origin_regex and re.fullmatch(origin_regex, origin):
+        return True
+    return False
 
 
 class Settings(BaseSettings):
@@ -59,14 +86,18 @@ class Settings(BaseSettings):
         return self.jwt_secret.strip() == "change-me-in-production-nanotronics-2024"
 
     def get_cors_origins(self) -> tuple[list[str] | str, str | None]:
-        """Retorna (origins, origin_regex). Si ALLOWED_ORIGINS vacío en prod, regex para Railway."""
-        if self.allowed_origins and self.allowed_origins.strip():
-            lista = [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
-            if lista:
-                return (lista, None)
+        """Retorna (origins, origin_regex).
+
+        En producción siempre se admite `*.railway.app` / `*.up.railway.app`
+        además de ALLOWED_ORIGINS (dominio custom). Railway regenera URLs
+        y una lista fija desactualizada dejaba el frontend sin API.
+        """
+        lista = normalize_allowed_origins(self.allowed_origins)
         if self.is_production:
-            return ([], r"^https://[\w.-]+\.up\.railway\.app$")
-        return ("*", None)
+            return lista, RAILWAY_ORIGIN_REGEX
+        if lista:
+            return lista, None
+        return "*", None
 
 
 @lru_cache

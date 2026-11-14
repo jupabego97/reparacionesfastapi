@@ -1,19 +1,24 @@
 """Middleware CORS que añade Access-Control-Allow-Origin para peticiones cross-origin.
-Soporta regex (ej. *.railway.app) o allow-all cuando no hay regex definido."""
-import re
+
+Acepta una lista explícita (ALLOWED_ORIGINS) y/o un regex (dominios Railway).
+"""
+from app.core.config import origin_is_allowed
 
 
-def wrap_with_cors_fallback(app, origin_regex: str | None):
+def wrap_with_cors_fallback(
+    app,
+    origin_regex: str | None,
+    allowed_origins: list[str] | str | None = None,
+):
     """Envuelve app ASGI para añadir CORS. Incluye Socket.IO y OPTIONS preflight."""
-    pattern = re.compile(origin_regex) if origin_regex else None
 
     def _is_allowed(origin: str | None) -> bool:
-        if not origin:
-            return False
-        if pattern:
-            return bool(pattern.fullmatch(origin))
-        # Sin regex → permitir cualquier origin (dev / ALLOWED_ORIGINS no definido)
-        return True
+        origins: list[str] | str
+        if allowed_origins is None:
+            origins = []
+        else:
+            origins = allowed_origins
+        return origin_is_allowed(origin, origins, origin_regex)
 
     async def asgi_wrapper(scope, receive, send):
         if scope["type"] != "http":

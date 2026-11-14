@@ -11,6 +11,13 @@ def test_health_live_and_ready_endpoints():
     assert "status" in live.json()
 
 
+def test_root_health_hint_for_railway():
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["health"] == "/health/live"
+
+
 def test_debug_schema_disabled_by_default():
     resp = client.get("/debug/schema")
     assert resp.status_code == 404

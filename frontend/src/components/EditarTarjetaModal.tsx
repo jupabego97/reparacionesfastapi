@@ -230,23 +230,60 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
     return 0;
   };
 
+  const cardFromForm = useMemo(() => {
+    if (!tarjeta) return null;
+    return {
+      ...tarjeta,
+      nombre_propietario: form.nombre_propietario,
+      problema: form.problema,
+      whatsapp: form.whatsapp,
+      notas_tecnicas: form.notas_tecnicas,
+      asignado_a: form.asignado_a === '' ? null : Number(form.asignado_a),
+      costo_estimado: form.costo_estimado === '' ? null : Number(form.costo_estimado),
+      columna: tarjeta.columna,
+    };
+  }, [tarjeta, form]);
+
   const handleColumnaChange = async (nextCol: string) => {
-    if (!tarjeta || nextCol === form.columna || statusSaving) return;
-    const reason = canMoveToColumn(tarjeta, nextCol, columnas, columnCount(nextCol), kanbanRules);
+    if (!tarjeta || !cardFromForm || nextCol === form.columna || statusSaving) return;
+    const reason = canMoveToColumn(cardFromForm, nextCol, columnas, columnCount(nextCol), kanbanRules);
     if (reason) {
       setStatusError(reason);
       return;
     }
 
     const previous = tarjeta;
+    const payload: TarjetaUpdate = { columna: nextCol };
+    const required = kanbanRules?.transition_requirements?.[nextCol] || [];
+    if (required.includes('asignado_a')) payload.asignado_a = cardFromForm.asignado_a;
+    if (required.includes('notas_tecnicas')) payload.notas_tecnicas = form.notas_tecnicas || '';
+    if (required.includes('problema')) payload.problema = form.problema;
+    if (required.includes('whatsapp')) payload.whatsapp = form.whatsapp;
+    if (required.includes('nombre_propietario')) payload.nombre_propietario = form.nombre_propietario;
+    if (required.includes('costo_estimado')) {
+      payload.costo_estimado = form.costo_estimado === '' ? null : Number(form.costo_estimado);
+    }
+    // Solo los campos del PUT entran al cache; el resto del form sigue dirty.
+    const optimistic = {
+      ...tarjeta,
+      columna: nextCol,
+      dias_en_columna: 0,
+      ...(payload.asignado_a !== undefined ? { asignado_a: payload.asignado_a } : {}),
+      ...(payload.notas_tecnicas !== undefined ? { notas_tecnicas: payload.notas_tecnicas } : {}),
+      ...(payload.problema !== undefined ? { problema: payload.problema } : {}),
+      ...(payload.whatsapp !== undefined ? { whatsapp: payload.whatsapp } : {}),
+      ...(payload.nombre_propietario !== undefined ? { nombre_propietario: payload.nombre_propietario } : {}),
+      ...(payload.costo_estimado !== undefined ? { costo_estimado: payload.costo_estimado } : {}),
+    };
+
     setStatusError('');
     setForm(f => ({ ...f, columna: nextCol }));
     setStatusSaving(true);
     void qc.cancelQueries({ queryKey: ['tarjetas-board'] });
-    syncCardToCaches({ ...tarjeta, columna: nextCol, dias_en_columna: 0 });
+    syncCardToCaches(optimistic);
 
     try {
-      const updated = await api.updateTarjeta(tarjetaId, { columna: nextCol });
+      const updated = await api.updateTarjeta(tarjetaId, payload);
       syncCardToCaches(updated);
       void qc.invalidateQueries({ queryKey: ['historial', tarjetaId] });
     } catch (err) {
@@ -394,10 +431,22 @@ export default function EditarTarjetaModal({ tarjetaId, onClose, remoteEditRevis
                           onChange={e => { void handleColumnaChange(e.target.value); }}
                           aria-busy={statusSaving}
                         >
-                          {columnas.map(c => <option key={c.key} value={c.key}>{c.title}</option>)}
+                          {columnas.map(c => {
+                            const blocked = c.key !== tarjeta.columna && cardFromForm
+                              ? canMoveToColumn(cardFromForm, c.key, columnas, columnCount(c.key), kanbanRules)
+                              : null;
+                            return (
+                              <option key={c.key} value={c.key} disabled={!!blocked} title={blocked || undefined}>
+                                {c.title}
+                              </option>
+                            );
+                          })}
                         </select>
                         {statusSaving && <span className="field-hint"><i className="fas fa-spinner fa-spin"></i> Actualizando estado…</span>}
                         {statusError && <span className="field-error">{statusError}</span>}
+                        {!statusSaving && !statusError && (
+                          <span className="field-hint">El estado se guarda al cambiarlo. Solo aparecen habilitados los destinos permitidos.</span>
+                        )}
                       </div>
                       <div className="form-group">
                         <label><i className="fas fa-flag"></i> Prioridad</label>
