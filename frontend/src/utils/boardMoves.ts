@@ -126,7 +126,8 @@ export function canMoveToColumn(
 
   const col = columnas.find(c => c.key === destCol);
   const wipLimit = col?.wip_limit ?? rules?.wip_limits?.[destCol];
-  if (wipLimit != null && destCardCount >= wipLimit) {
+  // El backend trata 0/null como "sin límite" (`if col.wip_limit:`). No bloquear aquí.
+  if (wipLimit != null && wipLimit > 0 && destCardCount >= wipLimit) {
     return `Límite WIP en "${col?.title || destCol}" (${wipLimit} máximo)`;
   }
 

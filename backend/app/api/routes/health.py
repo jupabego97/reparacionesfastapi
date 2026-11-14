@@ -17,6 +17,12 @@ from app.services.storage_service import get_storage_service
 router = APIRouter(tags=["health"])
 
 
+@router.get("/")
+def root():
+    """Railway healthcheck por defecto pega a `/`. No exponer datos, solo pistas de salud."""
+    return {"service": "reparaciones-api", "health": "/health/live"}
+
+
 @router.get("/health")
 def health_check(db: Session = Depends(get_db)):
     settings = get_settings()

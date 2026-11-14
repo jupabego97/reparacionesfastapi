@@ -42,6 +42,12 @@ self.addEventListener('fetch', event => {
   // No interceptar peticiones a la API ni a Socket.IO.
   if (url.pathname.startsWith('/api') || url.pathname.startsWith('/socket.io')) return;
 
+  // runtime-config.js cambia al reiniciar Railway; nunca cachearlo.
+  if (url.pathname === '/runtime-config.js') {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
+
   // El HTML siempre se solicita primero al servidor. Así una publicación nueva
   // no queda bloqueada por una copia vieja del index.html.
   if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {

@@ -1,5 +1,20 @@
+declare global {
+  interface Window {
+    /** Inyectado en runtime por frontend/scripts/start-static.mjs (Railway). */
+    __API_URL?: string;
+  }
+}
+
+/** Elige la URL del backend: runtime (Railway) gana sobre el valor horneado por Vite. */
+export function resolveApiBase(runtimeUrl?: string | null, bakedUrl?: string | null): string {
+  return String(runtimeUrl || bakedUrl || '').trim().replace(/\/$/, '');
+}
+
 /** URL del backend. En producción (servicios separados) = VITE_API_URL. En dev con proxy = '' */
-export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+export const API_BASE = resolveApiBase(
+  typeof window !== 'undefined' ? window.__API_URL : '',
+  import.meta.env.VITE_API_URL,
+);
 export const AUTH_TOKEN_REFRESHED_EVENT = 'auth-token-refreshed';
 
 export interface TarjetaBoardItem {

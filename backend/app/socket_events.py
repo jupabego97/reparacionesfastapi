@@ -1,27 +1,24 @@
-import re
-
 import jwt
 import socketio
 from loguru import logger
 
-from app.core.config import get_settings
+from app.core.config import get_settings, origin_is_allowed
 
 settings = get_settings()
 transports = ["polling"] if settings.socketio_safe_mode else ["websocket", "polling"]
 origins, origin_regex = settings.get_cors_origins()
-# Socket.IO soporta callable desde v5.x; usamos uno basado en regex cuando no hay lista explícita
+# Socket.IO soporta callable desde v5.x; combinamos lista explícita + regex de Railway.
 cors_sio: list[str] | str | object
-if origin_regex:
-    _pattern = re.compile(origin_regex)
+if origins == "*":
+    cors_sio = "*"
+    logger.info("Socket.IO CORS: allow all")
+else:
     def cors_sio(origin):  # type: ignore[misc]
-        result = bool(_pattern.fullmatch(origin)) if origin else False
+        result = origin_is_allowed(origin, origins, origin_regex)
         if not result:
             logger.warning(f"Socket.IO: origen rechazado por CORS: {origin!r}")
         return result
-    logger.info(f"Socket.IO CORS: regex callable ({origin_regex})")
-else:
-    cors_sio = origins
-    logger.info(f"Socket.IO CORS: lista explícita {origins!r}")
+    logger.info(f"Socket.IO CORS: lista {origins!r} regex={origin_regex!r}")
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins=cors_sio,
