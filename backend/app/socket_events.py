@@ -13,11 +13,12 @@ if origins == "*":
     cors_sio = "*"
     logger.info("Socket.IO CORS: allow all")
 else:
-    def cors_sio(origin):  # type: ignore[misc]
+    def _cors_origin_ok(origin: str | None) -> bool:
         result = origin_is_allowed(origin, origins, origin_regex)
         if not result:
             logger.warning(f"Socket.IO: origen rechazado por CORS: {origin!r}")
         return result
+    cors_sio = _cors_origin_ok
     logger.info(f"Socket.IO CORS: lista {origins!r} regex={origin_regex!r}")
 sio = socketio.AsyncServer(
     async_mode="asgi",
