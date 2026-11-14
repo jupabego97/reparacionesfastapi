@@ -52,15 +52,10 @@ Este proyecto está preparado para desplegarse en Railway con **3 servicios sepa
 
 ### 5. Migraciones de BD
 
-En el **servicio backend** → **Settings** → **Deploy**:
+Van en **Pre-deploy Command** (`backend/railway.json` ya lo pone: `python -m alembic upgrade head`). Nixpacks trata la línea `release:` del Procfile como un `RUN` del Dockerfile: Alembic corre **en el build**, sin el driver correcto, y el deploy falla. No añadas `release:` al Procfile.
 
-- **Predeploy Command** (o ejecutar manualmente una vez):
-  ```
-  cd backend && python -m alembic upgrade head
-  ```
-
-O desde la consola del servicio backend:
-```bash
+Si el Root Directory del servicio no es `backend`:
+```
 cd backend && python -m alembic upgrade head
 ```
 
@@ -95,3 +90,4 @@ cd backend && python -m alembic upgrade head
 3. Reinicia el frontend después de cambiar `VITE_API_URL` (el start regenera `runtime-config.js`).
 4. No sustituyas el Start Command por `npx serve ...`: `serve` se quedaba en `devDependencies` y `npm run build` en el start fallaba al podar Vite/tsc.
 5. Si usas dominio custom, añade esa URL en `ALLOWED_ORIGINS` del backend y redespliega.
+6. Si el build del backend falla con `No module named 'psycopg'`, Alembic se está ejecutando en el **build** (Procfile `release:`). Quita esa línea; las migraciones van en Pre-deploy.
